@@ -1,10 +1,14 @@
 import os
 import argparse
 import json
+
 from agent.graph import build_graph
+from agent.utils import extract_youtube_video_id, get_youtube_transcript
 
 
 def pretty_print(result: dict):
+    print(f"\n========== CATEGORY: {result.get('category', 'N/A')} ==========")
+    
     print("\n========== SUMMARY ==========")
     try:
         s = json.loads(result.get("summary", "{}"))
@@ -12,20 +16,29 @@ def pretty_print(result: dict):
     except Exception:
         print(result.get("summary", ""))
 
-    print("\n========== QUIZ ==========")
-    try:
-        q = json.loads(result.get("quiz", "{}"))
-        questions = q.get("questions", [])
-        if not questions:
-            print("(no quiz items)")
-        for i, item in enumerate(questions, 1):
-            print(f"\nQ{i}. {item.get('text') or item.get('question')}")
-            for j, opt in enumerate(item.get("options", []), 1):
-                print(f"  {j}) {opt}")
-            print("  정답:", item.get("answer"))
-    except Exception:
-        print(result.get("quiz", ""))
+    print("\n========== THOUGHT QUESTIONS ==========")
+    tq = result.get("thought_questions", [])
+    if tq:
+        for i, q in enumerate(tq, 1):
+            print(f"{i}. {q}")
+    else:
+        print("(no thought questions)")
 
+    if result.get("category") == "지식형":
+        print("\n========== QUIZ ==========")
+        try:
+            q = json.loads(result.get("quiz", "{}"))
+            questions = q.get("questions", [])
+            if not questions:
+                print("(no quiz items)")
+            for i, item in enumerate(questions, 1):
+                print(f"\nQ{i}. {item.get('text') or item.get('question')}")
+                for j, opt in enumerate(item.get("options", []), 1):
+                    print(f"  {j}) {opt}")
+                print("  정답:", item.get("answer"))
+        except Exception:
+            print(result.get("quiz", ""))
+    
     print("\n========== JUDGE ==========")
     print("score:", result.get("judge_score"))
     print("needs_improve:", result.get("needs_improve"))
@@ -37,7 +50,10 @@ def pretty_print(result: dict):
     if cits:
         print("citations:")
         for c in cits:
-            print(f" - {c.get('id')}")
+            cid = c.get("id")
+            txt = (c.get("text") or "").replace("\n"," ")
+            snip = (txt[:140] + "…") if len(txt) > 140 else txt
+            print(f" - {cid}: {snip}")
     else:
         print("citations: (none)")
 
@@ -45,16 +61,24 @@ def pretty_print(result: dict):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", type=str, help="Input text")
+    parser.add_argument("--url", type=str, help="YouTube URL")
     args = parser.parse_args()
 
-    if not args.text:
-        raise ValueError('No input. Try: python main.py --text "$(cat article.txt)"')
+    input_text = ""
+    if args.url:
+        print(f"Extracting transcript from: {args.url}")
+        video_id = extract_youtube_video_id(args.url)
+        input_text = get_youtube_transcript(video_id)
+    elif args.text:
+        input_text = args.text
+    else:
+        raise ValueError('No input. Try: python main.py --url "https://youtu.be/..." or --text "$(cat article.txt)"')
 
     if not os.getenv("UPSTAGE_API_KEY"):
         raise ValueError("UPSTAGE_API_KEY not set")
 
     graph = build_graph()
-    result = graph.invoke({"input_text": args.text, "max_improve": 2})
+    result = graph.invoke({"input_text": input_text, "max_improve": 2})
     pretty_print(result)
 
 
