@@ -162,7 +162,7 @@ def improve_node(state):
 
 
 def quiz_node(state):
-    """(옵션) 최종 verified summary 기반 퀴즈 및 생각유도질문 생성"""
+    """(옵션) 최종 verified summary 기반 콘텐츠 타입별 맞춤형 결과 생성"""
     category = state.get("category", "지식형")
     try:
         s_obj = json.loads(state.get("summary", ""))
@@ -170,33 +170,34 @@ def quiz_node(state):
     except Exception:
         summary_text = ""
 
-    # 1. 생각 유도 질문 생성 (공통)
-    resp_thought = llm.invoke(
-        THOUGHT_QUESTION_PROMPT 
-        + f"\n\n[CATEGORY]: {category}"
-        + "\n\n[SUMMARY]\n" + str(summary_text)
-    )
-    try:
-        thought_questions = json.loads(resp_thought.content)
-        state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
-    except Exception:
-        state["thought_questions"] = []
+    # 초기화: 지식형은 퀴즈만, 일반형은 생각 유도 질문만 남기기 위함
+    state["thought_questions"] = []
+    state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
 
-    # 2. 퀴즈 생성 (지식형일 때만)
     if category == "지식형":
+        # 1. 지식형: 퀴즈만 생성
         resp_quiz = llm.invoke(QUIZ_FROM_SUMMARY_PROMPT + "\n\n[SUMMARY]\n" + str(summary_text))
         try:
             quiz_obj = json.loads(resp_quiz.content)
             if isinstance(quiz_obj, dict) and ("questions" in quiz_obj):
                 state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
-            else:
-                state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
         except Exception:
-            state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
+            pass
     else:
-        state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
+        # 2. 일반형: 생각 유도 질문만 생성
+        resp_thought = llm.invoke(
+            THOUGHT_QUESTION_PROMPT 
+            + f"\n\n[CATEGORY]: {category}"
+            + "\n\n[SUMMARY]\n" + str(summary_text)
+        )
+        try:
+            thought_questions = json.loads(resp_thought.content)
+            state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
+        except Exception:
+            pass
 
     return state
+
 
 
 # ============================================================
