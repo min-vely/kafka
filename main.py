@@ -33,8 +33,8 @@ def pretty_print(result: dict):
                 print("(no quiz items)")
             for i, item in enumerate(questions, 1):
                 print(f"\nQ{i}. {item.get('text') or item.get('question')}")
-                for j, opt in enumerate(item.get("options", []), 1):
-                    print(f"  {j}) {opt}")
+                for opt in item.get("options", []):
+                    print(f"  {opt}")
                 print("  정답:", item.get("answer"))
         except Exception:
             print(result.get("quiz", ""))
@@ -43,6 +43,26 @@ def pretty_print(result: dict):
     print("score:", result.get("judge_score"))
     print("needs_improve:", result.get("needs_improve"))
     print("improve_count:", result.get("improve_count", 0))
+
+    # 🆕 페르소나 정보 출력
+    print("\n========== PERSONA ==========")
+    print("style:", result.get("persona_style", "N/A"))
+    print("count:", result.get("persona_count", 0))
+    
+    # 🆕 페르소나가 적용된 최종 메시지 출력
+    styled = result.get("styled_content", "")
+    if styled:
+        print("\n========== STYLED CONTENT (페르소나 적용) ==========")
+        print(styled)
+    
+    # 🆕 에빙하우스 스케줄 출력
+    print("\n========== EBBINGHAUS SCHEDULE ==========")
+    schedule_dates = result.get("schedule_dates", [])
+    if schedule_dates:
+        for i, date in enumerate(schedule_dates, 1):
+            print(f"{i}차 알림: {date} 오전 8시 (출근길)")
+    else:
+        print("(no schedule)")
 
     print("\n========== RAG ==========")
     print("query:", result.get("query", ""))
