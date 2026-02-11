@@ -2,7 +2,7 @@
 import os
 import json
 from typing import Any, Dict
-
+from dotenv import load_dotenv
 from langchain_upstage import ChatUpstage
 
 from agent.prompts import (
@@ -18,6 +18,7 @@ from agent.prompts import (
 from agent.utils import calculate_ebbinghaus_dates
 from agent.rag import verify_summary_with_rag
 
+load_dotenv()
 
 # -----------------------------
 # LLM
@@ -33,16 +34,16 @@ llm = ChatUpstage(
 # Nodes
 # -----------------------------
 def classify_node(state):
-    """0) 콘텐츠 성격을 분석하여 '지식형' 또는 '일반형'으로 분류 (CoT 적용)"""
+    """0) 콘텐츠 성격을 분석하여 '지식형' 또는 '힐링형'으로 분류 (CoT 적용)"""
     article = state["input_text"]
     resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + article[:2000])
     raw_output = (resp.content or "").strip()
     
-    # "Category: [지식형]" 또는 "Category: [일반형]"에서 추출
+    # "Category: [지식형]" 또는 "Category: [힐링형]"에서 추출
     if "지식형" in raw_output:
         category = "지식형"
-    elif "일반형" in raw_output:
-        category = "일반형"
+    elif "힐링형" in raw_output:
+        category = "힐링형"
     else:
         category = "지식형"
         
@@ -170,7 +171,7 @@ def quiz_node(state):
     except Exception:
         summary_text = ""
 
-    # 초기화: 지식형은 퀴즈만, 일반형은 생각 유도 질문만 남기기 위함
+    # 초기화: 지식형은 퀴즈만, 힐링형은 생각 유도 질문만 남기기 위함
     state["thought_questions"] = []
     state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
 
@@ -184,7 +185,7 @@ def quiz_node(state):
         except Exception:
             pass
     else:
-        # 2. 일반형: 생각 유도 질문만 생성
+        # 2. 힐링형: 생각 유도 질문만 생성
         resp_thought = llm.invoke(
             THOUGHT_QUESTION_PROMPT 
             + f"\n\n[CATEGORY]: {category}"

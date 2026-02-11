@@ -7,3 +7,4 @@ requests
 beautifulsoup4
 langchain-community
 youtube_transcript_api
+python-dotenv
