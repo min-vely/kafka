@@ -20,9 +20,19 @@ from agent.prompts import QUERY_REWRITE_PROMPT, RERANK_PROMPT
 # -----------------------------
 # 1) Vectorstore / Query Rewrite
 # -----------------------------
+
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except Exception:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 def build_vectorstore(text: str) -> FAISS:
     """기사 원문을 청크로 쪼개 임베딩한 뒤, FAISS 벡터스토어를 생성합니다."""
-    splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=250,
+        chunk_overlap=60,
+        separators=["\n\n", "\n", ". ", "? ", "! ", " "],
+    )
     chunks = splitter.split_text(text or "")
 
     embeddings = UpstageEmbeddings(
@@ -30,6 +40,8 @@ def build_vectorstore(text: str) -> FAISS:
         api_key=os.environ["UPSTAGE_API_KEY"],
     )
     return FAISS.from_texts(chunks, embeddings)
+
+
 
 
 def rewrite_query(llm: ChatUpstage, article_text: str) -> str:
