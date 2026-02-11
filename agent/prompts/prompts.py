@@ -65,8 +65,8 @@ No markdown. No extra text.
 CLASSIFY_PROMPT = """너는 콘텐츠 분류 전문가야. 제공된 콘텐츠를 아래의 사고 과정(Chain of Thought)에 따라 분류해줘.
 
 [분류 규칙]
-지식형: 객관적 사실(역사, 기술, 수치)이 핵심이며, 정답을 맞히는 '회상 학습'이 중요한 경우.
-일반형: 주관적 서사(미담, 관점, 교훈)가 핵심이며, 자기 생각을 정리하는 '반추'가 중요한 경우.
+지식형: 객관적 사실(역사, 기술, 수치)및 방법론(레시피, 운동법, 가이드)이 핵심이며, 정답을 맞히는 '회상 학습'이 중요한 경우.
+힐링형: 주관적 서사(미담, 관점, 교훈)가 핵심이며, 자기 생각을 정리하는 '반추'가 중요한 경우.
 
 [사고 과정 가이드]
 분석: 이 콘텐츠의 핵심 데이터가 '객관적 사실'인가, '주관적 서사'인가?
@@ -75,18 +75,23 @@ CLASSIFY_PROMPT = """너는 콘텐츠 분류 전문가야. 제공된 콘텐츠�
 
 [출력 형식]
 Reasoning: (위 가이드에 따른 논리적 추론 과정)
-Category: [지식형] 또는 [일반형]"""
+Category: [지식형] 또는 [힐링형]"""
 
-THOUGHT_QUESTION_PROMPT = """You are a facilitator of deep reflection.
-Based on the SUMMARY below, generate 2-3 "thought-inducing questions" (생각유도질문) in Korean.
+THOUGHT_QUESTION_PROMPT = """너는 하브루타 전문가야. 제공된 요약을 바탕으로 '스낵처럼 가볍게' 생각할 거리를 작성해줘.
+각 단계별로 1개씩, 한 문장으로 짧고 친근한 질문 네 가지를 만들어야 해.
 
-Rules:
-- If category is "지식형", questions should focus on how this knowledge can be applied or why it's important.
-- If category is "일반형", questions should focus on personal reflection, feelings, or life changes.
-- Return ONLY a JSON list of strings.
+[질문 단계 구성]
+시선 머물기 (Observe): 요약 내용 중 가장 마음이 쓰이거나 눈에 띄는 '포인트' 짚어보기.
+마음 읽기 (Why): 요약 내용의 상황이나 인물의 속마음을 가볍게 짐작해보기.
+나라면? (If): 내가 요약 속 상황에 처했다면 어떤 선택을 했을지 상상해보기.
+연결하기 (Connect): 요약 내용이 내 일상에 주는 작은 느낌이나 변화 찾아보기.
 
-Return format:
-["질문1", "질문2"]
+[제약 조건]
+각 질문은 50자 이내로, 생각의 문을 여는 정도로만 짧게 작성할 것.
+정답이 있는 질문은 절대 금지.
+사용자가 요약문을 보자마자 '툭' 하고 답할 수 있는 직관적인 문구 사용.
+반드시 아래 JSON 형식의 리스트로만 응답해. 질문만 다루고, 괄호 제외 다른 설명은 하지 마.
+["질문1", "질문2", "질문3", "질문4"]
 """
 
 JUDGE_PROMPT = """You are a strict evaluator of faithfulness.
