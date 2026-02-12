@@ -1,6 +1,7 @@
 # agent/nodes/nodes.py
 import os
 import json
+import re
 from typing import Any, Dict
 from dotenv import load_dotenv
 from langchain_upstage import ChatUpstage
@@ -84,6 +85,9 @@ def verify_node(state):
 
     verified_summary = verified.get("verified_summary", "")
 
+    # 🔧 공백 정리 (이상한 이중 공백 제거)
+    verified_summary = re.sub(r"\s+", " ", verified_summary).strip()
+
     state["summary"] = json.dumps(
         {
             "Summary": verified_summary,
@@ -92,6 +96,7 @@ def verify_node(state):
         },
         ensure_ascii=False,
     )
+
 
     # 컨텍스트가 비었거나 unsupported가 있으면 개선 루프
     state["needs_improve"] = (not str(state["context"]).strip()) or (len(state["unsupported_sentences"]) > 0)
@@ -165,13 +170,19 @@ def improve_node(state):
 def quiz_node(state):
     """(옵션) 최종 verified summary 기반 퀴즈 및 생각유도질문 생성"""
     category = state.get("category", "지식형")
+
+    # -----------------------------
+    # 1️⃣ Summary 추출
+    # -----------------------------
     try:
         s_obj = json.loads(state.get("summary", ""))
         summary_text = s_obj.get("Summary", "")
     except Exception:
         summary_text = ""
 
-
+    # 🔥 퀴즈 생성용에서는 citation 태그 제거
+    summary_text = re.sub(r"\s*\[C\d+\]\s*", " ", summary_text).strip()
+    
     # 초기화: 지식형은 퀴즈만, 힐링형은 생각 유도 질문만 남기기 위함
     state["thought_questions"] = []
     state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
@@ -191,7 +202,8 @@ def quiz_node(state):
         resp_quiz = llm.invoke(QUIZ_FROM_SUMMARY_PROMPT + "\n\n[SUMMARY]\n" + str(summary_text))
         try:
             quiz_obj = json.loads(resp_quiz.content)
-            if isinstance(quiz_obj, dict) and ("questions" in quiz_obj):
+
+            if isinstance(quiz_obj, dict) and "questions" in quiz_obj:
                 state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
             else:
                 state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
@@ -201,19 +213,25 @@ def quiz_node(state):
 
         # 2. 힐링형: 생각 유도 질문만 생성
         resp_thought = llm.invoke(
-            THOUGHT_QUESTION_PROMPT 
+            THOUGHT_QUESTION_PROMPT
             + f"\n\n[CATEGORY]: {category}"
-            + "\n\n[SUMMARY]\n" + str(summary_text)
+            + "\n\n[SUMMARY]\n"
+            + str(summary_text)
         )
+
         try:
             thought_questions = json.loads(resp_thought.content)
-            state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
+
+            if isinstance(thought_questions, list):
+                state["thought_questions"] = thought_questions
+
         except Exception:
             pass
         state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
 
 
     return state
+
 
 
 # ============================================================
