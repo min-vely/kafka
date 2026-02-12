@@ -81,22 +81,47 @@ def pretty_print(result: dict):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", type=str, help="Input text")
-    parser.add_argument("--url", type=str, help="YouTube URL")
+    parser.add_argument("--url", type=str, help="YouTube URL or News Article URL")
     args = parser.parse_args()
 
     input_text = ""
-    if args.url:
-        if is_youtube_url(args.url):
-            print(f"Extracting transcript from YouTube: {args.url}")
-            video_id = extract_youtube_video_id(args.url)
+    target_url = args.url
+    raw_text = args.text
+
+    # 인자가 아무것도 없을 경우 대화형 입력 모드 진입
+    if not target_url and not raw_text:
+        user_input = input("URL 또는 텍스트(파일명)를 입력하세요: ").strip()
+        if not user_input:
+            print("입력값이 없습니다. 프로그램을 종료합니다.")
+            return
+
+        # URL 판별
+        if user_input.startswith(("http://", "https://")):
+            target_url = user_input
+        # 파일 존재 여부 확인
+        elif os.path.isfile(user_input):
+            print(f"파일을 읽어옵니다: {user_input}")
+            with open(user_input, "r", encoding="utf-8") as f:
+                input_text = f.read()
+        # 그 외에는 일반 텍스트로 처리
+        else:
+            input_text = user_input
+
+    # URL 처리 로직
+    if target_url:
+        if is_youtube_url(target_url):
+            print(f"Extracting transcript from YouTube: {target_url}")
+            video_id = extract_youtube_video_id(target_url)
             input_text = get_youtube_transcript(video_id)
         else:
-            print(f"Extracting article content from: {args.url}")
-            input_text = get_article_content(args.url)
-    elif args.text:
-        input_text = args.text
-    else:
-        raise ValueError('No input. Try: python main.py --url "https://youtu.be/..." or --text "$(cat article.txt)"')
+            print(f"Extracting article content from: {target_url}")
+            input_text = get_article_content(target_url)
+    elif raw_text:
+        input_text = raw_text
+
+    if not input_text:
+        print("처리할 텍스트가 없습니다.")
+        return
 
     if not os.getenv("UPSTAGE_API_KEY"):
         raise ValueError("UPSTAGE_API_KEY not set")
