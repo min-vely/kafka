@@ -29,8 +29,8 @@ class AgentState(TypedDict, total=False):
     improve_count: int
     max_improve: int
 
-    # 🆕 persona & scheduling (에빙하우스 주기)
-    persona_style: str  # 현재 적용할 페르소나 유형 (예: "친근한 친구", "지혜로운 멘토" 등)
+    # persona & scheduling (에빙하우스 주기)
+    persona_style: str  # 현재 적용할 페르소나 유형
     persona_count: int  # 페르소나 순환 카운터 (0-9, 10개 페르소나 순차 적용)
     styled_content: str  # 페르소나가 적용된 최종 메시지
     schedule_dates: List[str]  # 에빙하우스 주기 날짜 (D+1, D+4, D+7, D+11)
