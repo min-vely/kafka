@@ -1,0 +1,15 @@
+name: Check PR Source Branch
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check_branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if source is develop
+        if: github.base_ref == 'main' && !(github.head_ref == 'develop' || startsWith(github.head_ref, 'hotfix/'))
+        run: |
+          echo "Error: Only 'develop' branch can be merged into 'main'!"
+          exit 1
