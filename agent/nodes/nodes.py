@@ -304,7 +304,8 @@ def schedule_node(state):
     동작:
     1. 오늘 날짜를 기준으로 D+1, D+4, D+7, D+11 계산
     2. 계산된 날짜를 상태에 저장
-    3. 크로스 플랫폼 팝업 알림 발송 (macOS + Windows)
+    3. 데이터베이스에 스케줄 영구 저장
+    4. 크로스 플랫폼 팝업 알림 발송 (macOS + Windows)
     
     이유: 
     - 에빙하우스 망각 곡선 이론:
@@ -313,6 +314,7 @@ def schedule_node(state):
       정보가 장기 기억으로 전환됩니다.
     - 발송 시간: 오전 8시 출근길 (인지 부하가 적은 시간)
     - 일일 최대 4회 (알림 스트레스 방지 - 듀오링고 문제점 개선)
+    - DB 저장: 프로그램 재시작 후에도 스케줄 유지
     """
     schedule_dates = calculate_ebbinghaus_dates()
     state["schedule_dates"] = schedule_dates
@@ -320,6 +322,26 @@ def schedule_node(state):
     print(f"\n📅 에빙하우스 알림 예약 완료:")
     for i, date in enumerate(schedule_dates, 1):
         print(f"  {i}차 알림: {date} 오전 8시")
+    
+    # 🆕 데이터베이스에 스케줄 저장
+    try:
+        from agent.database import get_db
+        
+        db = get_db()
+        schedule_id = db.save_schedule(
+            user_id="default_user",  # 향후 실제 사용자 ID로 대체
+            schedule_dates=schedule_dates,
+            styled_content=state.get("styled_content", ""),
+            persona_style=state.get("persona_style", ""),
+            persona_count=state.get("persona_count", 0),
+            url=state.get("url", ""),
+            summary=state.get("confirmed_summary", ""),
+            category=state.get("category", "지식형")
+        )
+        print(f"💾 데이터베이스 저장 완료 (Schedule ID: {schedule_id})")
+    except Exception as e:
+        print(f"\n⚠️  DB 저장 중 오류: {e}")
+        print("   (알림은 계속 진행됩니다)")
     
     # 🆕 크로스 플랫폼 팝업 알림 발송
     try:
