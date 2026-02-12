@@ -6,5 +6,6 @@ pydantic
 requests
 beautifulsoup4
 langchain-community
-youtube_transcript_api
+youtube-transcript-api
 python-dotenv
+plyer
