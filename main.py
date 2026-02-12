@@ -3,7 +3,7 @@ import argparse
 import json
 
 from agent.graph import build_graph
-from agent.utils import extract_youtube_video_id, get_youtube_transcript
+from agent.utils import is_youtube_url, extract_youtube_video_id, get_youtube_transcript, get_article_content
 
 
 def pretty_print(result: dict):
@@ -86,9 +86,13 @@ def main():
 
     input_text = ""
     if args.url:
-        print(f"Extracting transcript from: {args.url}")
-        video_id = extract_youtube_video_id(args.url)
-        input_text = get_youtube_transcript(video_id)
+        if is_youtube_url(args.url):
+            print(f"Extracting transcript from YouTube: {args.url}")
+            video_id = extract_youtube_video_id(args.url)
+            input_text = get_youtube_transcript(video_id)
+        else:
+            print(f"Extracting article content from: {args.url}")
+            input_text = get_article_content(args.url)
     elif args.text:
         input_text = args.text
     else:

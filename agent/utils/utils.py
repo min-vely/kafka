@@ -1,4 +1,6 @@
 import re
+import requests
+from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from typing import List
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -6,6 +8,27 @@ from youtube_transcript_api._errors import (
     NoTranscriptFound,
     TranscriptsDisabled,
 )
+
+def is_valid_url(url: str) -> bool:
+    """
+    URL이 유효한 형식(http/https 포함)인지 확인합니다.
+    """
+    try:
+        result = urlparse(url)
+        return all([result.scheme in ("http", "https"), result.netloc])
+    except Exception:
+        return False
+
+def is_youtube_url(url: str) -> bool:
+    """
+    URL이 유튜브 링크인지 확인합니다.
+    """
+    patterns = [
+        r"youtu\.be/",
+        r"youtube\.com/watch\?v=",
+        r"youtube\.com/shorts/"
+    ]
+    return any(re.search(pattern, url) for pattern in patterns)
 
 def extract_youtube_video_id(url: str) -> str:
     """
@@ -15,7 +38,6 @@ def extract_youtube_video_id(url: str) -> str:
     - https://www.youtube.com/watch?v={id}
     - https://www.youtube.com/shorts/{id}
     """
-
     patterns = [
         r"youtu\.be/([a-zA-Z0-9_-]{11})",
         r"youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})",
@@ -29,13 +51,10 @@ def extract_youtube_video_id(url: str) -> str:
 
     raise ValueError("Invalid YouTube URL. Only valid YouTube video links are allowed.")
 
-
-
 def get_youtube_transcript(video_id: str) -> str:
     """
     유튜브 video_id로부터 자막을 가져와 하나의 텍스트로 반환
     """
-
     try:
         ytt_api = YouTubeTranscriptApi()
         transcript = ytt_api.fetch(video_id, languages=["ko", "en"])
@@ -49,6 +68,30 @@ def get_youtube_transcript(video_id: str) -> str:
     full_text = " ".join([item.text for item in transcript])
     return full_text
 
+def get_article_content(url: str) -> str:
+    """
+    Jina Reader(r.jina.ai)를 사용하여 뉴스 기사 제목과 본문을 추출합니다.
+    """
+    if not is_valid_url(url):
+        raise ValueError(f"유효하지 않은 URL 형식입니다: {url}")
+
+    jina_url = f"https://r.jina.ai/{url}"
+    try:
+        # 타임아웃 10초 설정
+        response = requests.get(jina_url, timeout=10)
+        response.raise_for_status()
+        
+        content = response.text
+        # 본문이 너무 짧으면 뉴스 기사가 아닐 확률이 높음
+        ########### 이 부분은 잠시 주석처리 했습니다!!!!!! 본문 짧을 경우를 생각해보고 글자수 제한할거임
+        # if len(content.strip()) < 150:
+        #     raise ValueError("추출된 본문 내용이 너무 짧습니다. 유효한 뉴스 기사 링크인지 확인해주세요.")
+            
+        return content
+    except requests.exceptions.Timeout:
+        raise ValueError("뉴스 기사를 가져오는 중 타임아웃이 발생했습니다. 다시 시도해주세요.")
+    except Exception as e:
+        raise ValueError(f"뉴스 기사를 가져오는 데 실패했습니다: {str(e)}")
 
 # ============================================================
 # 🆕 에빙하우스 망각 곡선 날짜 계산
