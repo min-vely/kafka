@@ -127,7 +127,18 @@ def main():
         raise ValueError("UPSTAGE_API_KEY not set")
 
     graph = build_graph()
-    result = graph.invoke({"input_text": input_text, "max_improve": 2})
+    
+    # 초기 상태 설정
+    initial_state = {
+        "input_text": input_text,
+        "max_improve": 2
+    }
+    
+    # URL이 있으면 추가
+    if target_url:
+        initial_state["url"] = target_url
+    
+    result = graph.invoke(initial_state)
     pretty_print(result)
 
 

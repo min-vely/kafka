@@ -4,6 +4,7 @@ from typing import TypedDict, List, Dict, Any
 class AgentState(TypedDict, total=False):
     # inputs
     input_text: str
+    url: str  # 원본 URL (있는 경우)
 
     # classification
     category: str  # "지식형" or "일반형"

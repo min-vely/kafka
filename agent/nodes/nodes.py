@@ -308,17 +308,32 @@ def schedule_node(state):
         from agent.database import get_db
         
         db = get_db()
+        
+        # URL 추출 (input_text 또는 별도 url 필드)
+        url = state.get("url", "") or state.get("input_text", "")
+        
+        # 요약 추출 (summary는 JSON 문자열일 수 있음)
+        summary_raw = state.get("summary", "")
+        try:
+            # JSON 형태면 파싱
+            summary_obj = json.loads(summary_raw)
+            summary_text = summary_obj.get("Summary", str(summary_obj))
+        except:
+            summary_text = str(summary_raw)
+        
         schedule_id = db.save_schedule(
             user_id="default_user",  # 향후 실제 사용자 ID로 대체
             schedule_dates=schedule_dates,
             styled_content=state.get("styled_content", ""),
             persona_style=state.get("persona_style", ""),
             persona_count=state.get("persona_count", 0),
-            url=state.get("url", ""),
-            summary=state.get("confirmed_summary", ""),
+            url=url,
+            summary=summary_text,
             category=state.get("category", "지식형")
         )
         print(f"💾 데이터베이스 저장 완료 (Schedule ID: {schedule_id})")
+        print(f"   - URL: {url[:50] if url else '(텍스트 입력)'}...")
+        print(f"   - 요약: {summary_text[:50] if summary_text else '(없음)'}...")
     except Exception as e:
         print(f"\n⚠️  DB 저장 중 오류: {e}")
         print("   (알림은 계속 진행됩니다)")
