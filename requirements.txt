@@ -9,3 +9,6 @@ langchain-community
 youtube-transcript-api
 python-dotenv
 plyer
+pyobjc
+
+
