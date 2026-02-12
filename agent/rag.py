@@ -64,7 +64,11 @@ def rewrite_query(llm: ChatUpstage, article_text: str) -> str:
     if not content:
         content = "기사 핵심(수치/비교/기능/조건/발언)을 요약하기 위한 근거 문장 검색 쿼리"
 
+    # ✅ 여기서 반드시 정리
+    content = _clean_llm_query_output(content)
+
     return content
+
 
 
 def _to_relevance(score: float) -> float:
@@ -73,6 +77,50 @@ def _to_relevance(score: float) -> float:
         return 1.0 / (1.0 + float(score))
     except Exception:
         return 0.0
+
+
+# ✅ rewrite_query 출력에서 메타 텍스트/따옴표/마크다운 제거
+def _clean_llm_query_output(s: str, max_len: int = 160) -> str:
+    s = (s or "").strip()
+
+    # 1) 라벨 제거
+    s = re.sub(r"^\*+\s*쿼리\s*\*+\s*:\s*", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"^\s*query\s*:\s*", "", s, flags=re.IGNORECASE)
+
+    # 2) 큰 블록이 시작되는 지점에서 '잘라내기'
+    #    (아래 키워드가 나오면 그 이전까지만 남김)
+    cut_markers = [
+        "\n",                # 여러 줄이면 첫 줄만
+        "citations:",        # citations 블록 제거
+        "**최종",            # **최종 출력**, **최종 답변** 제거
+        "최종 출력",         # 한글 최종 출력
+        "시스템 요구사항",    # 시스템 요구사항 준수... 제거
+        "(※",                # 주석/설명 제거
+    ]
+    for m in cut_markers:
+        if m in s:
+            s = s.split(m, 1)[0].strip()
+
+    # 3) 따옴표로 시작하는 '두 번째 덩어리'가 붙는 경우(너 로그 케이스) 잘라내기
+    if ' "' in s:
+        s = s.split(' "', 1)[0].strip()
+    if '"' in s and s.count('"') >= 1:
+        # 중간에 따옴표가 나오면 뒤는 버리기 (LLM이 "..." 블록을 붙일 때)
+        s = s.split('"', 1)[0].strip()
+
+    # 4) 메타 문구 제거 (남아 있으면)
+    s = re.sub(r"\*\*최종\s*답변\*\*|최종\s*답변|실제\s*답변", "", s).strip()
+
+    # 5) 공백/따옴표 정리
+    s = s.strip().strip('"').strip("'")
+    s = re.sub(r"\s+", " ", s).strip()
+
+    # 6) 길이 제한
+    if len(s) > max_len:
+        s = s[:max_len].rstrip(" ,.;")
+
+    return s
+
 
 
 # -----------------------------
@@ -278,6 +326,11 @@ def verify_summary_with_rag(
     # 관측/디버깅용: 기사 전체 기반 1문장 검색 쿼리(verify 루프에서 직접 사용하진 않음)
     global_query = rewrite_query(llm, article_text)
 
+
+    # 🔧 수정 사항/주석 블록 제거 (최종 요약만 검증)
+    summary_draft = (summary_draft or "").split("※ 수정 사항:")[0].strip()
+    #
+
     sentences = _split_sentences_ko(summary_draft)
     if not sentences:
         return {
@@ -379,6 +432,7 @@ def verify_summary_with_rag(
 
     context = "\n\n".join(context_blocks)
     verified_summary = "\n".join(verified_lines).strip()
+
 
     return {
         "query": global_query,
