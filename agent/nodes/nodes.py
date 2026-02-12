@@ -168,10 +168,7 @@ def improve_node(state):
 
 
 def quiz_node(state):
-    """(옵션) 최종 verified summary 기반 콘텐츠 타입별 맞춤형 결과 생성"""
-
-    import re
-
+    """(옵션) 최종 verified summary 기반 퀴즈 및 생각유도질문 생성"""
     category = state.get("category", "지식형")
 
     # -----------------------------
@@ -185,38 +182,36 @@ def quiz_node(state):
 
     # 🔥 퀴즈 생성용에서는 citation 태그 제거
     summary_text = re.sub(r"\s*\[C\d+\]\s*", " ", summary_text).strip()
-
-    # -----------------------------
-    # 2️⃣ 초기화
-    # -----------------------------
+    
+    # 초기화: 지식형은 퀴즈만, 힐링형은 생각 유도 질문만 남기기 위함
     state["thought_questions"] = []
     state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
-
-    # -----------------------------
-    # 3️⃣ 지식형 → 퀴즈 생성
-    # -----------------------------
+    # 1. 생각 유도 질문 생성 (공통)
+    resp_thought = llm.invoke(
+        THOUGHT_QUESTION_PROMPT 
+        + f"\n\n[CATEGORY]: {category}"
+        + "\n\n[SUMMARY]\n" + str(summary_text)
+    )
+    try:
+        thought_questions = json.loads(resp_thought.content)
+        state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
+    except Exception:
+        state["thought_questions"] = []
+    # 2. 퀴즈 생성 (지식형일 때만)
     if category == "지식형":
-
-        resp_quiz = llm.invoke(
-            QUIZ_FROM_SUMMARY_PROMPT
-            + "\n\n[SUMMARY]\n"
-            + str(summary_text)
-        )
-
+        resp_quiz = llm.invoke(QUIZ_FROM_SUMMARY_PROMPT + "\n\n[SUMMARY]\n" + str(summary_text))
         try:
             quiz_obj = json.loads(resp_quiz.content)
 
             if isinstance(quiz_obj, dict) and "questions" in quiz_obj:
                 state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
-
+            else:
+                state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
         except Exception:
-            pass
-
-    # -----------------------------
-    # 4️⃣ 힐링형 → 생각 질문 생성
-    # -----------------------------
+            state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
     else:
 
+        # 2. 힐링형: 생각 유도 질문만 생성
         resp_thought = llm.invoke(
             THOUGHT_QUESTION_PROMPT
             + f"\n\n[CATEGORY]: {category}"
@@ -232,14 +227,15 @@ def quiz_node(state):
 
         except Exception:
             pass
+        state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
+
 
     return state
 
 
 
-
 # ============================================================
-# 🆕 페르소나 적용 노드
+# 페르소나 적용 노드
 # ============================================================
 
 def persona_node(state):
@@ -298,24 +294,25 @@ def persona_node(state):
 
 
 # ============================================================
-# 🆕 에빙하우스 스케줄링 노드
+# 에빙하우스 스케줄링 노드
 # ============================================================
 
 def schedule_node(state):
     """
-    에빙하우스 망각 곡선에 따라 복습 알림 날짜를 계산합니다.
+    에빙하우스 망각 곡선에 따라 복습 알림 날짜를 계산하고 팝업 알림을 발송합니다.
     
     동작:
     1. 오늘 날짜를 기준으로 D+1, D+4, D+7, D+11 계산
     2. 계산된 날짜를 상태에 저장
+    3. 크로스 플랫폼 팝업 알림 발송 (macOS + Windows)
     
     이유:
     - 에빙하우스 망각 곡선 이론:
       학습 직후 망각이 급격히 일어나지만,
       적절한 시점(1일, 4일, 7일, 11일)에 복습하면
       정보가 장기 기억으로 전환됩니다.
-    - 발송 시간은 '오전 8시 출근길'이 권장되지만,
-      실제 발송 시스템은 별도 스케줄러(Celery 등)에서 처리합니다.
+    - 발송 시간: 오전 8시 출근길 (인지 부하가 적은 시간)
+    - 일일 최대 4회 (알림 스트레스 방지 - 듀오링고 문제점 개선)
     """
     schedule_dates = calculate_ebbinghaus_dates()
     state["schedule_dates"] = schedule_dates
@@ -323,5 +320,21 @@ def schedule_node(state):
     print(f"\n📅 에빙하우스 알림 예약 완료:")
     for i, date in enumerate(schedule_dates, 1):
         print(f"  {i}차 알림: {date} 오전 8시")
+    
+    # 🆕 크로스 플랫폼 팝업 알림 발송
+    try:
+        from agent.notification.popup import schedule_popup_notifications
+        
+        schedule_popup_notifications(
+            schedule_dates=schedule_dates,
+            styled_content=state.get("styled_content", ""),
+            persona_style=state.get("persona_style", ""),
+            category=state.get("category", "지식형")
+        )
+    except ImportError as e:
+        print(f"\n⚠️  알림 모듈을 찾을 수 없습니다: {e}")
+        print("   해결: pip3 install plyer")
+    except Exception as e:
+        print(f"\n⚠️  알림 발송 중 오류: {e}")
     
     return state
