@@ -1,9 +1,16 @@
 QUERY_REWRITE_PROMPT = """You rewrite a retrieval query for summarizing an article.
+
 Focus on:
-- key statistics (numbers, percentages)
-- comparisons (age groups, segments)
-- main findings
-- usage categories/actions
+- Core features / services / product names / main entities
+- Key figures (percentages, amounts, indices, scale) and comparisons
+- Major statements or evaluations (if quotable)
+- Service flow (signup / settings / usage process) and value proposition
+
+Rules:
+- Include proper nouns or service names explicitly mentioned in the article.
+- Generalize anecdotal or individual-specific details (e.g., a commuting office worker in Gyeonggi) instead of using overly specific personal scenarios.
+- Output exactly one concise Korean sentence as the query.
+
 Return ONLY one concise Korean query sentence (no quotes, no extra text).
 """
 
