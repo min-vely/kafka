@@ -183,52 +183,32 @@ def quiz_node(state):
     # 🔥 퀴즈 생성용에서는 citation 태그 제거
     summary_text = re.sub(r"\s*\[C\d+\]\s*", " ", summary_text).strip()
     
-    # 초기화: 지식형은 퀴즈만, 힐링형은 생각 유도 질문만 남기기 위함
+    # 초기화
     state["thought_questions"] = []
     state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
-    # 1. 생각 유도 질문 생성 (공통)
-    resp_thought = llm.invoke(
-        THOUGHT_QUESTION_PROMPT 
-        + f"\n\n[CATEGORY]: {category}"
-        + "\n\n[SUMMARY]\n" + str(summary_text)
-    )
-    try:
-        thought_questions = json.loads(resp_thought.content)
-        state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
-    except Exception:
-        state["thought_questions"] = []
-    # 2. 퀴즈 생성 (지식형일 때만)
+
+    # 1. 지식형: 퀴즈만 생성
     if category == "지식형":
         resp_quiz = llm.invoke(QUIZ_FROM_SUMMARY_PROMPT + "\n\n[SUMMARY]\n" + str(summary_text))
         try:
             quiz_obj = json.loads(resp_quiz.content)
-
             if isinstance(quiz_obj, dict) and "questions" in quiz_obj:
                 state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
-            else:
-                state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
-        except Exception:
-            state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
-    else:
-
-        # 2. 힐링형: 생각 유도 질문만 생성
-        resp_thought = llm.invoke(
-            THOUGHT_QUESTION_PROMPT
-            + f"\n\n[CATEGORY]: {category}"
-            + "\n\n[SUMMARY]\n"
-            + str(summary_text)
-        )
-
-        try:
-            thought_questions = json.loads(resp_thought.content)
-
-            if isinstance(thought_questions, list):
-                state["thought_questions"] = thought_questions
-
         except Exception:
             pass
-        state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
-
+    
+    # 2. 힐링형: 생각 유도 질문만 생성
+    else:
+        resp_thought = llm.invoke(
+            THOUGHT_QUESTION_PROMPT 
+            + f"\n\n[CATEGORY]: {category}"
+            + "\n\n[SUMMARY]\n" + str(summary_text)
+        )
+        try:
+            thought_questions = json.loads(resp_thought.content)
+            state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
+        except Exception:
+            pass
 
     return state
 
