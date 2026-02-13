@@ -5,6 +5,12 @@ import re
 from typing import Any, Dict
 from dotenv import load_dotenv
 from langchain_upstage import ChatUpstage
+from langchain_core.tools import tool
+
+try:
+    from tavily import TavilyClient
+except ImportError:
+    TavilyClient = None
 
 from agent.prompts import (
     SUMMARY_DRAFT_PROMPT,
@@ -13,13 +19,66 @@ from agent.prompts import (
     IMPROVE_DRAFT_PROMPT,
     CLASSIFY_PROMPT,
     THOUGHT_QUESTION_PROMPT,
+    KNOWLEDGE_TYPE_CLASSIFY_PROMPT,
+    TAVILY_QUERY_GENERATOR_PROMPT,
+    UPDATE_ANALYSIS_PROMPT,
     PERSONA_DEFINITIONS,
     PERSONA_APPLY_PROMPT,
 )
 from agent.utils import calculate_ebbinghaus_dates
 from agent.rag import verify_summary_with_rag
+from agent.database import get_db
 
 load_dotenv()
+
+# -----------------------------
+# Tools
+# -----------------------------
+@tool
+def get_latest_update_analysis(summary_text: str) -> str:
+    """
+    주어진 요약(summary_text)에 대해 최신 정보를 웹에서 검색하고, 
+    과거 정보와 현재 상황을 비교 분석한 한 줄 소식을 반환합니다.
+    최신 트렌드, 뉴스, 인물 현황 등의 업데이트가 필요할 때 사용합니다.
+    """
+    try:
+        tavily_key = os.environ.get("TAVILY_API_KEY")
+        if not (tavily_key and TavilyClient):
+            return "Tavily API Key가 없거나 라이브러리가 설치되지 않았습니다."
+            
+        client = TavilyClient(api_key=tavily_key)
+        
+        # 1. 최신 정보를 찾기 위한 전용 검색어 생성
+        print("   - 전용 검색어 생성 중...")
+        query_gen_prompt = TAVILY_QUERY_GENERATOR_PROMPT.format(summary_text=summary_text)
+        search_query_resp = llm.invoke(query_gen_prompt)
+        search_query = (search_query_resp.content or "").strip()
+        print(f"   - 검색어: {search_query}")
+        
+        # 2. Tavily 검색
+        print("   - Tavily 웹 검색 중...")
+        response = client.search(query=search_query, search_depth="advanced", max_results=3)
+        results = response.get("results", [])
+        
+        if not results:
+            return "최신 정보를 검색해 보았으나, 현재로서는 업데이트된 내용이 발견되지 않았습니다."
+            
+        search_results_text = ""
+        for res in results:
+            search_results_text += f"- 제목: {res['title']}\n  내용: {res['content']}\n  URL: {res['url']}\n\n"
+        
+        # 3. 분석
+        print("   - 검색 결과와 원문 비교 분석 중...")
+        analysis_prompt = UPDATE_ANALYSIS_PROMPT.format(
+            summary_text=summary_text,
+            search_results=search_results_text
+        )
+        analysis_resp = llm.invoke(analysis_prompt)
+        return (analysis_resp.content or "").strip()
+        
+    except Exception as e:
+        return f"(웹 서치 및 분석 중 오류 발생: {str(e)})"
+
 
 # -----------------------------
 # LLM
@@ -36,6 +95,7 @@ llm = ChatUpstage(
 # -----------------------------
 def classify_node(state):
     """0) 콘텐츠 성격을 분석하여 '지식형' 또는 '힐링형'으로 분류 (CoT 적용)"""
+    print("\n[Node] classify_node: 콘텐츠 분류 중...")
     article = state["input_text"]
     resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + article[:2000])
     raw_output = (resp.content or "").strip()
@@ -54,6 +114,7 @@ def classify_node(state):
 
 def synthesize_node(state):
     """1) 기사 원문으로 요약 초안(draft_summary)만 생성 (RAG 사용 X)"""
+    print("[Node] synthesize_node: 요약 초안 생성 중...")
     article = state["input_text"]
 
     resp = llm.invoke(SUMMARY_DRAFT_PROMPT + "\n\n[ARTICLE]\n" + article)
@@ -65,6 +126,7 @@ def synthesize_node(state):
 
 def verify_node(state):
     """2) 요약 초안을 RAG로 검증(근거 문맥 구성/문장 검증 결과 저장)"""
+    print("[Node] verify_node: RAG 검증 및 벡터 DB 생성 중 (시간이 소요될 수 있습니다)...")
     article = state["input_text"]
     draft = state.get("draft_summary", "")
 
@@ -167,6 +229,67 @@ def improve_node(state):
     return state
 
 
+def knowledge_augmentation_node(state: Dict[str, Any]):
+    """
+    지식형 콘텐츠에 대해 추가 정보를 보강합니다. (Tool-calling 방식)
+    1. 최신 정보형 (Dynamic): get_latest_update_analysis 도구 자동 호출
+    2. 고정 지식형 (Static): 개인 URL DB에서 비슷한 정보 추천
+    """
+    category = state.get("category", "지식형")
+    
+    # 힐링형은 보강 없이 통과
+    if category != "지식형":
+        return state
+        
+    summary_json = state.get("summary", "")
+    try:
+        s_obj = json.loads(summary_json)
+        summary_text = s_obj.get("Summary", "")
+    except Exception:
+        summary_text = str(summary_json)
+    
+    # 도구가 바인딩된 LLM 생성
+    llm_with_tools = llm.bind_tools([get_latest_update_analysis])
+    
+    # 1. 정보 유형 분석 및 도구 호출 판단
+    print("🧠 콘텐츠 유형 분석 및 웹 검색 여부 판단 중...")
+    resp = llm_with_tools.invoke([
+        ("system", KNOWLEDGE_TYPE_CLASSIFY_PROMPT),
+        ("human", f"이 요약본에 대해 최신 정보 검색이 필요할까? 필요하면 도구를 호출하고, 아니면 'Static'이라고 답해.\n\n[SUMMARY]\n{summary_text}")
+    ])
+    
+    augmentation_info = ""
+    
+    # 2-1. LLM이 도구를 호출한 경우 (Dynamic)
+    if resp.tool_calls:
+        print(f"🔍 [Dynamic] 최신 정보 업데이트 필요: {resp.tool_calls[0]['name']} 실행 중...")
+        for tool_call in resp.tool_calls:
+            if tool_call["name"] == "get_latest_update_analysis":
+                # 도구 실행 및 결과 획득
+                result = get_latest_update_analysis.invoke(tool_call["args"])
+                augmentation_info = "\n\n" + str(result)
+                print("✅ 웹 검색 및 분석 완료.")
+    
+    # 2-2. 도구 호출이 없는 경우 (Static 등)
+    else:
+        print("📚 [Static] 고정 지식형 콘텐츠: 관련 콘텐츠 추천 진행...")
+        try:
+            db = get_db()
+            recommends = db.get_similar_recommendations(category="지식형", limit=2)
+            if recommends:
+                info_list = []
+                for rec in recommends:
+                    info_list.append(f"- {rec['url']} (페르소나: {rec['persona_style']})")
+                augmentation_info = "\n\n[함께 보면 좋은 콘텐츠]\n" + "\n".join(info_list)
+            else:
+                augmentation_info = "\n\n[함께 보면 좋은 콘텐츠]\n아직 저장된 비슷한 콘텐츠가 없습니다."
+        except Exception as e:
+            augmentation_info = f"\n\n(추천 정보를 가져오는 중 오류 발생: {str(e)})"
+            
+    state["augmentation_info"] = augmentation_info
+    return state
+
+
 def quiz_node(state):
     """(옵션) 최종 verified summary 기반 퀴즈 및 생각유도질문 생성"""
     category = state.get("category", "지식형")
@@ -251,7 +374,10 @@ def persona_node(state):
     
     if category == "지식형":
         quiz_text = state.get("quiz", "")
+        aug_info = state.get("augmentation_info", "")
         content_to_style = f"[요약]\n{summary_text}\n\n[퀴즈]\n{quiz_text}"
+        if aug_info:
+            content_to_style += f"\n\n{aug_info}"
     else:
         thought_text = "\n".join(state.get("thought_questions", []))
         content_to_style = f"[요약]\n{summary_text}\n\n[생각 유도 질문]\n{thought_text}"
