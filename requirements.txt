@@ -10,5 +10,6 @@ youtube-transcript-api
 python-dotenv
 plyer
 pyobjc
+apscheduler
 
 

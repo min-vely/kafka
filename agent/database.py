@@ -148,6 +148,43 @@ class ScheduleDB:
         
         return schedules
     
+    def get_schedules_for_date(self, date: str) -> List[Dict]:
+        """
+        특정 날짜에 발송할 스케줄 조회
+        
+        Args:
+            date: 날짜 문자열 (YYYY-MM-DD 형식, 예: "2026-02-13")
+        
+        Returns:
+            해당 날짜가 schedule_dates에 포함된 pending 스케줄 리스트
+        
+        사용 예:
+            schedules = db.get_schedules_for_date("2026-02-13")
+            # 2026-02-13에 발송해야 하는 스케줄들 반환
+        
+        이유:
+            - 스케줄러가 매일 오전 8시에 실행될 때 오늘 발송할 스케줄만 조회
+            - schedule_dates는 JSON 배열로 저장되므로 LIKE 검색 사용
+        """
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM schedules 
+            WHERE status = 'pending'
+            AND schedule_dates LIKE ?
+            ORDER BY created_at DESC
+        ''', (f'%"{date}"%',))
+        
+        rows = cursor.fetchall()
+        
+        # Row를 Dict로 변환
+        schedules = []
+        for row in rows:
+            schedule = dict(row)
+            # JSON 문자열은 그대로 유지 (jobs.py에서 파싱)
+            schedules.append(schedule)
+        
+        return schedules
+    
     def get_schedule_by_id(self, schedule_id: int) -> Optional[Dict]:
         """
         특정 스케줄 조회
