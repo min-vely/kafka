@@ -4,6 +4,7 @@ from agent.nodes import (
     classify_node,
     synthesize_node,
     verify_node,
+    ab_select_node,
     judge_node,
     improve_node,
     quiz_node,
@@ -18,6 +19,7 @@ def build_graph():
     g.add_node("classify", classify_node)
     g.add_node("synthesize", synthesize_node)
     g.add_node("verify", verify_node)
+    g.add_node("ab_select", ab_select_node)
     g.add_node("judge", judge_node)
     g.add_node("improve", improve_node)
     g.add_node("quiz", quiz_node)
@@ -28,7 +30,8 @@ def build_graph():
 
     g.add_edge("classify", "synthesize")
     g.add_edge("synthesize", "verify")
-    g.add_edge("verify", "judge")
+    g.add_edge("verify", "ab_select")
+    g.add_edge("ab_select", "judge")
 
     def route_after_judge(state: AgentState):
         return "improve" if state.get("needs_improve") else "quiz"

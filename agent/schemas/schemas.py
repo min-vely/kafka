@@ -7,20 +7,19 @@ class AgentState(TypedDict, total=False):
     url: str  # 원본 URL (있는 경우)
 
     # classification
-    category: str  # "지식형" or "일반형"
+    category: str  # "지식형" or "힐링형"
 
     # draft (LLM summarization output, no citations)
     draft_summary: str
 
     # rag verification outputs
     query: str  # retrieval query used for RAG (debug/observability)
-
     context: str
     citations: List[Dict[str, Any]]          # [{"id":"C1","text":"..."}]
     unsupported_sentences: List[str]
 
     # outputs
-    summary: str   # JSON string: {"Summary":"...","UsedCitations":[...],"Citations":[...]}
+    summary: str   # 최종 요약 텍스트(= A/B 승자 요약이 들어감)
     quiz: str      # JSON string: {"questions":[...]}
     thought_questions: List[str]
 
@@ -30,8 +29,15 @@ class AgentState(TypedDict, total=False):
     improve_count: int
     max_improve: int
 
+    # A/B eval flags & outputs
+    do_ab_eval: bool              # 항상 A/B 비교할지
+    print_eval: bool              # 리포트를 출력할지
+    pairwise_eval: Dict[str, Any] # A/B 평가 리포트
+    winner: str                   # "A" or "B" or "NONE"
+    rag_summary: str              # 디버깅용: RAG 요약 원본 저장(선택)
+
     # persona & scheduling (에빙하우스 주기)
-    persona_style: str  # 현재 적용할 페르소나 유형
-    persona_count: int  # 페르소나 순환 카운터 (0-9, 10개 페르소나 순차 적용)
-    styled_content: str  # 페르소나가 적용된 최종 메시지
-    schedule_dates: List[str]  # 에빙하우스 주기 날짜 (D+1, D+4, D+7, D+11)
+    persona_style: str
+    persona_count: int
+    styled_content: str
+    schedule_dates: List[str]

@@ -1,8 +1,7 @@
-# agent/nodes/nodes.py
 import os
 import json
 import re
-from typing import Any, Dict
+from typing import Any
 from dotenv import load_dotenv
 from langchain_upstage import ChatUpstage
 
@@ -18,6 +17,7 @@ from agent.prompts import (
 )
 from agent.utils import calculate_ebbinghaus_dates
 from agent.rag import verify_summary_with_rag
+from agent.eval_pairwise import eval_rag_vs_llm  # ✅ 여기 있는 함수 시그니처에 맞춰 호출해야 함
 
 load_dotenv()
 
@@ -32,22 +32,49 @@ llm = ChatUpstage(
 
 
 # -----------------------------
+# Helpers
+# -----------------------------
+_CIT_RE = re.compile(r"\[C\d+\]")
+
+def _extract_text(x: Any) -> str:
+    """summary가 str/json(dict)/None 등으로 들어와도 비교용 텍스트를 안정적으로 뽑습니다."""
+    if x is None:
+        return ""
+    if isinstance(x, str):
+        s = x.strip()
+        try:
+            obj = json.loads(s)
+            if isinstance(obj, dict):
+                for k in ["Summary", "summary", "요약", "text", "content"]:
+                    if k in obj and isinstance(obj[k], str):
+                        return obj[k].strip()
+        except Exception:
+            pass
+        return s
+    if isinstance(x, dict):
+        for k in ["Summary", "summary", "요약", "text", "content"]:
+            if k in x and isinstance(x[k], str):
+                return x[k].strip()
+        return json.dumps(x, ensure_ascii=False)
+    return str(x).strip()
+
+
+# -----------------------------
 # Nodes
 # -----------------------------
 def classify_node(state):
-    """0) 콘텐츠 성격을 분석하여 '지식형' 또는 '힐링형'으로 분류 (CoT 적용)"""
+    """0) 콘텐츠 성격을 분석하여 '지식형' 또는 '힐링형'으로 분류"""
     article = state["input_text"]
     resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + article[:2000])
     raw_output = (resp.content or "").strip()
-    
-    # "Category: [지식형]" 또는 "Category: [힐링형]"에서 추출
+
     if "지식형" in raw_output:
         category = "지식형"
     elif "힐링형" in raw_output:
         category = "힐링형"
     else:
         category = "지식형"
-        
+
     state["category"] = category
     return state
 
@@ -55,7 +82,6 @@ def classify_node(state):
 def synthesize_node(state):
     """1) 기사 원문으로 요약 초안(draft_summary)만 생성 (RAG 사용 X)"""
     article = state["input_text"]
-
     resp = llm.invoke(SUMMARY_DRAFT_PROMPT + "\n\n[ARTICLE]\n" + article)
     draft = (resp.content or "").strip()
 
@@ -68,7 +94,6 @@ def verify_node(state):
     article = state["input_text"]
     draft = state.get("draft_summary", "")
 
-    # rag.py의 원본 verify_summary_with_rag 호출 (시그니처에 맞춰 직접 전달)
     verified = verify_summary_with_rag(
         llm=llm,
         article_text=article,
@@ -84,10 +109,9 @@ def verify_node(state):
     state["unsupported_sentences"] = verified.get("unsupported_sentences", [])
 
     verified_summary = verified.get("verified_summary", "")
-
-    # 🔧 공백 정리 (이상한 이중 공백 제거)
     verified_summary = re.sub(r"\s+", " ", verified_summary).strip()
 
+    # RAG 검증 요약은 일단 JSON 형태로 저장(디버그/DB용)
     state["summary"] = json.dumps(
         {
             "Summary": verified_summary,
@@ -97,23 +121,73 @@ def verify_node(state):
         ensure_ascii=False,
     )
 
-
     # 컨텍스트가 비었거나 unsupported가 있으면 개선 루프
     state["needs_improve"] = (not str(state["context"]).strip()) or (len(state["unsupported_sentences"]) > 0)
-
     return state
 
 
-def judge_node(state):
-    """3) 검증된 CONTEXT vs SUMMARY faithfulness 채점"""
-    context = state.get("context", "")
-    summary_json = state.get("summary", "")
+def ab_select_node(state: dict):
+    """
+    - A: state['draft_summary'] (LLM-only)
+    - B: state['summary'] (RAG 검증 요약: JSON string일 수 있음)
+    목표: A/B 비교 후 더 나은 쪽을 최종 summary로 채택.
+    """
+    do_ab = bool(state.get("do_ab_eval", True))
+    a_raw = state.get("draft_summary")
+    b_raw = state.get("summary")
 
-    try:
-        s_obj = json.loads(summary_json)
-        summary_text = s_obj.get("Summary", "")
-    except Exception:
-        summary_text = str(summary_json)
+    a = _extract_text(a_raw)
+    b = _extract_text(b_raw)
+
+    # 평가 편향 줄이기: RAG 요약의 [C1] 같은 태그 제거하고 비교
+    a_for_eval = a
+    b_for_eval = _CIT_RE.sub("", b)
+
+    report = None
+    winner = None
+
+    if do_ab and a_for_eval and b_for_eval:
+        try:
+            # ✅ eval_pairwise.py의 실제 시그니처에 맞춤
+            report = eval_rag_vs_llm(
+                llm=llm,
+                article_text=state.get("input_text", ""),
+                draft_summary=a_for_eval,
+                rag_summary=b_for_eval,
+            )
+            winner = (report.get("overall") or {}).get("winner")
+        except Exception as e:
+            report = {"error": f"{type(e).__name__}: {e}"}
+            winner = None
+
+    # 최종 선택 로직
+    if winner == "A":
+        final = a
+        final_source = "A"
+    elif winner == "B":
+        final = b
+        final_source = "B"
+    else:
+        # 비교 불가 / TIE -> RAG 우선
+        final = b or a or ""
+        final_source = "B" if b else ("A" if a else "NONE")
+
+    # downstream은 state["summary"]만 보면 됨
+    return {
+        "pairwise_eval": report,
+        "winner": final_source,
+        "rag_summary": b_raw,   # 디버깅용(원본 보존)
+        "summary": final,       # ✅ 최종 요약(텍스트)
+    }
+
+
+def judge_node(state):
+    """3) CONTEXT vs SUMMARY faithfulness 채점"""
+    context = state.get("context", "")
+    summary_val = state.get("summary", "")
+
+    # summary가 JSON일 수도/텍스트일 수도 있으니 안전하게 처리
+    summary_text = _extract_text(summary_val)
 
     resp = llm.invoke(
         JUDGE_PROMPT
@@ -163,31 +237,19 @@ def improve_node(state):
     improved_draft = (resp.content or "").strip()
     state["draft_summary"] = improved_draft
     state["improve_count"] = count + 1
-
     return state
 
 
 def quiz_node(state):
-    """(옵션) 최종 verified summary 기반 퀴즈 및 생각유도질문 생성"""
+    """최종 summary 기반 퀴즈/생각유도질문 생성"""
     category = state.get("category", "지식형")
 
-    # -----------------------------
-    # 1️⃣ Summary 추출
-    # -----------------------------
-    try:
-        s_obj = json.loads(state.get("summary", ""))
-        summary_text = s_obj.get("Summary", "")
-    except Exception:
-        summary_text = ""
-
-    # 🔥 퀴즈 생성용에서는 citation 태그 제거
+    summary_text = _extract_text(state.get("summary", ""))
     summary_text = re.sub(r"\s*\[C\d+\]\s*", " ", summary_text).strip()
-    
-    # 초기화
+
     state["thought_questions"] = []
     state["quiz"] = json.dumps({"questions": []}, ensure_ascii=False)
 
-    # 1. 지식형: 퀴즈만 생성
     if category == "지식형":
         resp_quiz = llm.invoke(QUIZ_FROM_SUMMARY_PROMPT + "\n\n[SUMMARY]\n" + str(summary_text))
         try:
@@ -196,11 +258,9 @@ def quiz_node(state):
                 state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
         except Exception:
             pass
-    
-    # 2. 힐링형: 생각 유도 질문만 생성
     else:
         resp_thought = llm.invoke(
-            THOUGHT_QUESTION_PROMPT 
+            THOUGHT_QUESTION_PROMPT
             + f"\n\n[CATEGORY]: {category}"
             + "\n\n[SUMMARY]\n" + str(summary_text)
         )
@@ -213,116 +273,61 @@ def quiz_node(state):
     return state
 
 
-
-# ============================================================
-# 페르소나 적용 노드
-# ============================================================
-
 def persona_node(state):
-    """
-    확정된 요약과 퀴즈/질문에 페르소나를 입힙니다.
-    
-    동작:
-    1. 현재 페르소나 카운터를 확인 (0-9 순환)
-    2. 콘텐츠 유형에 따라 퀴즈형/문장형 페르소나 선택
-    3. 페르소나 스타일을 적용한 메시지 생성
-    
-    이유:
-    - 매번 같은 말투로 알림이 오면 사용자가 지루해져 알림을 차단할 수 있습니다.
-    - 10가지 페르소나를 순차적으로 적용하여 '친구가 안부를 묻는' 느낌을 줍니다.
-    """
+    """페르소나 적용"""
     category = state.get("category", "지식형")
     persona_count = int(state.get("persona_count", 0))
-    
-    # 페르소나 선택 (0-9 순환)
+
     if category == "지식형":
         persona_key = f"quiz_{persona_count % 5}"
     else:
         persona_key = f"thought_{persona_count % 5}"
-    
+
     persona_def = PERSONA_DEFINITIONS.get(persona_key, PERSONA_DEFINITIONS["quiz_0"])
-    
-    # 적용할 콘텐츠 준비
-    try:
-        s_obj = json.loads(state.get("summary", ""))
-        summary_text = s_obj.get("Summary", "")
-    except Exception:
-        summary_text = state.get("summary", "")
-    
+
+    summary_text = _extract_text(state.get("summary", ""))
+
     if category == "지식형":
         quiz_text = state.get("quiz", "")
         content_to_style = f"[요약]\n{summary_text}\n\n[퀴즈]\n{quiz_text}"
     else:
         thought_text = "\n".join(state.get("thought_questions", []))
         content_to_style = f"[요약]\n{summary_text}\n\n[생각 유도 질문]\n{thought_text}"
-    
-    # 페르소나 적용
+
     prompt = PERSONA_APPLY_PROMPT.format(
         persona_definition=json.dumps(persona_def, ensure_ascii=False),
         content=content_to_style
     )
-    
+
     resp = llm.invoke(prompt)
     styled_content = (resp.content or "").strip()
-    
-    # 상태 업데이트
+
     state["persona_style"] = persona_def["name"]
     state["styled_content"] = styled_content
     state["persona_count"] = persona_count + 1
-    
     return state
 
 
-# ============================================================
-# 에빙하우스 스케줄링 노드
-# ============================================================
-
 def schedule_node(state):
-    """
-    에빙하우스 망각 곡선에 따라 복습 알림 날짜를 계산하고 팝업 알림을 발송합니다.
-    
-    동작:
-    1. 오늘 날짜를 기준으로 D+1, D+4, D+7, D+11 계산
-    2. 계산된 날짜를 상태에 저장
-    3. 데이터베이스에 스케줄 영구 저장
-    4. 크로스 플랫폼 팝업 알림 발송 (macOS + Windows)
-    
-    이유: 
-    - 에빙하우스 망각 곡선 이론:
-      학습 직후 망각이 급격히 일어나지만,
-      적절한 시점(1일, 4일, 7일, 11일)에 복습하면
-      정보가 장기 기억으로 전환됩니다.
-    - 발송 시간: 오전 8시 출근길 (인지 부하가 적은 시간)
-    - 일일 최대 4회 (알림 스트레스 방지 - 듀오링고 문제점 개선)
-    - DB 저장: 프로그램 재시작 후에도 스케줄 유지
-    """
+    """에빙하우스 스케줄링 + DB 저장 + 팝업"""
     schedule_dates = calculate_ebbinghaus_dates()
     state["schedule_dates"] = schedule_dates
-    
+
     print(f"\n📅 에빙하우스 알림 예약 완료:")
     for i, date in enumerate(schedule_dates, 1):
         print(f"  {i}차 알림: {date} 오전 8시")
-    
-    # 🆕 데이터베이스에 스케줄 저장
+
+    # DB 저장
     try:
         from agent.database import get_db
-        
         db = get_db()
-        
-        # URL 추출 (input_text 또는 별도 url 필드)
+
         url = state.get("url", "") or state.get("input_text", "")
-        
-        # 요약 추출 (summary는 JSON 문자열일 수 있음)
-        summary_raw = state.get("summary", "")
-        try:
-            # JSON 형태면 파싱
-            summary_obj = json.loads(summary_raw)
-            summary_text = summary_obj.get("Summary", str(summary_obj))
-        except:
-            summary_text = str(summary_raw)
-        
+
+        summary_text = _extract_text(state.get("summary", ""))
+
         schedule_id = db.save_schedule(
-            user_id="default_user",  # 향후 실제 사용자 ID로 대체
+            user_id="default_user",
             schedule_dates=schedule_dates,
             styled_content=state.get("styled_content", ""),
             persona_style=state.get("persona_style", ""),
@@ -337,11 +342,11 @@ def schedule_node(state):
     except Exception as e:
         print(f"\n⚠️  DB 저장 중 오류: {e}")
         print("   (알림은 계속 진행됩니다)")
-    
-    # 🆕 크로스 플랫폼 팝업 알림 발송
+
+    # 팝업 알림
     try:
         from agent.notification.popup import schedule_popup_notifications
-        
+
         schedule_popup_notifications(
             schedule_dates=schedule_dates,
             styled_content=state.get("styled_content", ""),
@@ -353,5 +358,5 @@ def schedule_node(state):
         print("   해결: pip3 install plyer")
     except Exception as e:
         print(f"\n⚠️  알림 발송 중 오류: {e}")
-    
+
     return state
