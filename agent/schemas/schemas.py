@@ -3,8 +3,12 @@ from typing import TypedDict, List, Dict, Any
 
 class AgentState(TypedDict, total=False):
     # inputs
-    input_text: str
+    user_input: str # 사용자가 입력한 원본 내용 (URL, 파일명, 또는 일반 텍스트)
+    input_text: str  # 추출되거나 읽어온 실제 본문 내용
     url: str  # 원본 URL (있는 경우)
+    is_valid: bool  # input_url_node에서 URL 검증(False일 경우 서비스 중단)
+    messages: str  # 사용자에게 URL 또는 text 검증 후 피드백(예: 유효하지 않은 URL, 요약 시작 메시지 전송)
+    is_safe: bool  # extract_content_node에서 콘텐츠 안정성 여부 피드백(False일 경우 서비스 중단)
 
     # classification
     category: str  # "지식형" or "일반형"

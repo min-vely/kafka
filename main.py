@@ -1,12 +1,30 @@
 import os
 import argparse
 import json
-
 from agent.graph import build_graph
-from agent.utils import is_youtube_url, extract_youtube_video_id, get_youtube_transcript, get_article_content
-
+#유틸 모두 graph로 이동
 
 def pretty_print(result: dict):
+    #extract_content_node노드 검증
+    final_msg = result.get("messages", "메시지가 없습니다.")
+    is_valid = result.get("is_valid")
+    is_safe = result.get("is_safe")
+
+    print("\n" + "=" * 10 + " 🔍 INPUT VERIFICATION " + "=" * 10)
+    # [1단계] 주소/입력 유효성
+    valid_status = "✅ PASS" if is_valid else "❌ FAIL"
+    print(f"STATUS  : {valid_status}")
+
+    # [2단계] 콘텐츠 안전성 (is_valid가 True일 때만 출력)
+    if is_valid:
+        safe_status = "✅ SAFE" if is_safe else "🚨 UNSAFE"
+        print(f"SAFETY  : {safe_status}")
+    else:
+        print(f"SAFETY  : ➖ SKIP (검증 실패)")
+
+    print(f"MESSAGE : {final_msg}")
+    print("=" * 43)
+
     print(f"\n========== CATEGORY: {result.get('category', 'N/A')} ==========")
     
     print("\n========== SUMMARY ==========")
@@ -84,61 +102,83 @@ def main():
     parser.add_argument("--url", type=str, help="YouTube URL or News Article URL")
     args = parser.parse_args()
 
+    # input_url노드로 값 받기 위한 변수 추가(input_text, source_input)
     input_text = ""
     target_url = args.url
     raw_text = args.text
+    source_input = ""
+
+    # 1. 터미널 인자(--text, --url)가 있는 경우
+    if raw_text:
+        source_input = raw_text
+        input_text = raw_text  # 텍스트면 바로 본문으로!
+    elif target_url:
+        source_input = target_url
+        input_text = ""  # URL은 노드에서 추출해야 하니까 비워둠
 
     # 인자가 아무것도 없을 경우 대화형 입력 모드 진입
-    if not target_url and not raw_text:
+    else:
         user_input = input("URL 또는 텍스트(파일명)를 입력하세요: ").strip()
         if not user_input:
             print("입력값이 없습니다. 프로그램을 종료합니다.")
             return
 
-        # URL 판별
-        if user_input.startswith(("http://", "https://")):
-            target_url = user_input
+        # URL 판별(input_url로 이동)
+        #if user_input.startswith(("http://", "https://")):
+        #target_url = user_input
+
         # 파일 존재 여부 확인
-        elif os.path.isfile(user_input):
+        if os.path.isfile(user_input):
             print(f"파일을 읽어옵니다: {user_input}")
             with open(user_input, "r", encoding="utf-8") as f:
                 input_text = f.read()
-        # 그 외에는 일반 텍스트로 처리
+            source_input = user_input # 파일이면 경로를 넣어줌
         else:
-            input_text = user_input
+            #[중요!] URL 오타 등을 검증하려면 input_text에 미리 담지 말고
+            # source_input에만 담아서 1번 노드로 보내야 합니다.
+            source_input = user_input
+            input_text = "" #본문 비우기
 
-    # URL 처리 로직
-    if target_url:
-        if is_youtube_url(target_url):
-            print(f"Extracting transcript from YouTube: {target_url}")
-            video_id = extract_youtube_video_id(target_url)
-            input_text = get_youtube_transcript(video_id)
-        else:
-            print(f"Extracting article content from: {target_url}")
-            input_text = get_article_content(target_url)
-    elif raw_text:
-        input_text = raw_text
 
-    if not input_text:
-        print("처리할 텍스트가 없습니다.")
-        return
+    # URL 처리 로직(extract_content_node로 이동)
+    # if target_url:
+    #     if is_youtube_url(target_url):
+    #         print(f"Extracting transcript from YouTube: {target_url}")
+    #         video_id = extract_youtube_video_id(target_url)
+    #         input_text = get_youtube_transcript(video_id)
+    #     else:
+    #         print(f"Extracting article content from: {target_url}")
+    #         input_text = get_article_content(target_url)
+    # if not source_input:
+    #     print("처리할 내용이 없습니다.")
+    #     return
+
+    # if raw_text:
+    #     input_text = raw_text
+    #
+    # if not input_text:
+    #     print("처리할 텍스트가 없습니다.")
+    #     return
 
     if not os.getenv("UPSTAGE_API_KEY"):
         raise ValueError("UPSTAGE_API_KEY not set")
 
     graph = build_graph()
-    
-    # 초기 상태 설정
+
+    # 만약 위에서 source_input이 제대로 안 담겼을 경우 대비한 코드
+    if not source_input and 'user_input' in locals():
+        source_input = user_input
+
+    # 그래프에 전달할 초기 상태(State) 설정
     initial_state = {
-        "input_text": input_text,
+        "user_input": source_input,  # URL이나 직접 입력한 텍스트
+        "input_text": input_text,  # 파일에서 읽어온 '본문' 내용 (여기에 넣어줘야 함!)
         "max_improve": 2
     }
     
-    # URL이 있으면 추가
-    if target_url:
-        initial_state["url"] = target_url
-    
-    print("\n🚀 Kafka AI 워크플로우를 시작합니다...")
+    # URL이 있으면 추가(input_url로 기능 이동)
+    # if target_url:
+    #     initial_state["url"] = target_url
     result = graph.invoke(initial_state)
     pretty_print(result)
 
