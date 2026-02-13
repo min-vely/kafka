@@ -430,6 +430,7 @@ def schedule_node(state):
         print(f"  {i}차 알림: {date} 오전 8시")
     
     # 🆕 데이터베이스에 스케줄 저장
+    schedule_id = None  # 초기화 (DB 저장 실패 시를 대비)
     try:
         from agent.database import get_db
         
@@ -447,6 +448,9 @@ def schedule_node(state):
         except:
             summary_text = str(summary_raw)
         
+        # 퀴즈 문제 추출 (questions는 리스트 형태)
+        questions = state.get("questions", [])
+        
         schedule_id = db.save_schedule(
             user_id="default_user",  # 향후 실제 사용자 ID로 대체
             schedule_dates=schedule_dates,
@@ -455,11 +459,13 @@ def schedule_node(state):
             persona_count=state.get("persona_count", 0),
             url=url,
             summary=summary_text,
-            category=state.get("category", "지식형")
+            category=state.get("category", "지식형"),
+            questions=questions  # ✅ 퀴즈 문제 DB에 저장
         )
         print(f"💾 데이터베이스 저장 완료 (Schedule ID: {schedule_id})")
         print(f"   - URL: {url[:50] if url else '(텍스트 입력)'}...")
         print(f"   - 요약: {summary_text[:50] if summary_text else '(없음)'}...")
+        print(f"   - 퀴즈: {len(questions)}개 문제 저장됨" if questions else "   - 퀴즈: (없음)")
     except Exception as e:
         print(f"\n⚠️  DB 저장 중 오류: {e}")
         print("   (알림은 계속 진행됩니다)")
@@ -472,7 +478,8 @@ def schedule_node(state):
             schedule_dates=schedule_dates,
             styled_content=state.get("styled_content", ""),
             persona_style=state.get("persona_style", ""),
-            category=state.get("category", "지식형")
+            category=state.get("category", "지식형"),
+            schedule_id=schedule_id  # ✅ DB에서 생성된 ID 전달
         )
     except ImportError as e:
         print(f"\n⚠️  알림 모듈을 찾을 수 없습니다: {e}")

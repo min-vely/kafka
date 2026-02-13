@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>카프카 퀴즈 - {{ persona_style }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🎓 카프카 복습 퀴즈</h1>
+            <p class="subtitle">{{ notification_index }}차 복습 · {{ persona_style }}</p>
+        </header>
+        
+        <div class="progress-info">
+            <p>📅 복습 진행도: {{ notification_index }} / 4</p>
+        </div>
+        
+        <div class="summary-box">
+            <h2>📝 요약</h2>
+            <p>{{ summary }}</p>
+        </div>
+        
+        <form id="quiz-form">
+            <div class="question">
+                <h3>Q{{ notification_index }}. {{ question.text }}</h3>
+                <div class="options">
+                    {% for opt in question.options %}
+                    <label class="option">
+                        <input type="radio" 
+                               name="answer" 
+                               value="{{ opt[0] }}" 
+                               required>
+                        <span class="option-text">{{ opt }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <button type="submit" class="submit-btn">제출하기</button>
+        </form>
+        
+        <div id="result" class="result-box" style="display: none;"></div>
+    </div>
+    
+    <script>
+        const scheduleId = {{ schedule_id }};
+        const notificationIndex = {{ notification_index }};
+    </script>
+    <script src="{{ url_for('static', filename='js/quiz.js') }}"></script>
+</body>
+</html>

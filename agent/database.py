@@ -54,10 +54,19 @@ class ScheduleDB:
                 styled_content TEXT NOT NULL,
                 persona_style TEXT,
                 persona_count INTEGER,
+                questions TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT DEFAULT 'pending'
             )
         ''')
+        
+        # 기존 테이블에 questions 컬럼 추가 (ALTER TABLE - 안전하게)
+        try:
+            cursor.execute("ALTER TABLE schedules ADD COLUMN questions TEXT")
+            print("✅ schedules 테이블에 questions 컬럼 추가됨")
+        except sqlite3.OperationalError:
+            # 이미 존재하면 무시
+            pass
         
         # 알림 발송 이력 테이블
         cursor.execute('''
@@ -69,6 +78,35 @@ class ScheduleDB:
                 sent_at TIMESTAMP,
                 is_success BOOLEAN,
                 error_message TEXT,
+                FOREIGN KEY (schedule_id) REFERENCES schedules(id)
+            )
+        ''')
+        
+        # 퀴즈 시도 기록 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS quiz_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER NOT NULL,
+                notification_index INTEGER NOT NULL,
+                user_answers TEXT NOT NULL,
+                correct_answers TEXT NOT NULL,
+                score INTEGER NOT NULL,
+                is_passed BOOLEAN NOT NULL,
+                attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (schedule_id) REFERENCES schedules(id)
+            )
+        ''')
+        
+        # 오답 재발송 스케줄 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS retry_schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER NOT NULL,
+                notification_index INTEGER NOT NULL,
+                retry_date TEXT NOT NULL,
+                retry_count INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (schedule_id) REFERENCES schedules(id)
             )
         ''')
@@ -85,7 +123,8 @@ class ScheduleDB:
         persona_count: int,
         url: str = None,
         summary: str = None,
-        category: str = "지식형"
+        category: str = "지식형",
+        questions: List[dict] = None
     ) -> int:
         """
         새로운 스케줄 저장
@@ -99,6 +138,7 @@ class ScheduleDB:
             url: 원본 URL (선택)
             summary: 3줄 요약 (선택)
             category: 콘텐츠 유형 (지식형/일반형)
+            questions: 퀴즈 문제 리스트 (선택) - JSON 형태로 저장
         
         Returns:
             생성된 스케줄 ID
@@ -108,13 +148,16 @@ class ScheduleDB:
         # 날짜 리스트를 JSON으로 변환
         dates_json = json.dumps(schedule_dates)
         
+        # 퀴즈 문제를 JSON으로 변환
+        questions_json = json.dumps(questions, ensure_ascii=False) if questions else None
+        
         cursor.execute('''
             INSERT INTO schedules 
             (user_id, url, summary, category, schedule_dates, 
-             styled_content, persona_style, persona_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             styled_content, persona_style, persona_count, questions)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (user_id, url, summary, category, dates_json, 
-              styled_content, persona_style, persona_count))
+              styled_content, persona_style, persona_count, questions_json))
         
         self.conn.commit()
         schedule_id = cursor.lastrowid
@@ -281,6 +324,125 @@ class ScheduleDB:
             'total_notifications_sent': sent
         }
     
+    def save_quiz_attempt(
+        self,
+        schedule_id: int,
+        notification_index: int,
+        user_answers: List[str],
+        correct_answers: List[str],
+        score: int,
+        is_passed: bool
+    ) -> int:
+        """
+        퀴즈 시도 기록 저장
+        
+        Args:
+            schedule_id: 스케줄 ID
+            notification_index: 알림 차수
+            user_answers: 사용자 답안 리스트
+            correct_answers: 정답 리스트
+            score: 점수 (0-100)
+            is_passed: 합격 여부 (60점 이상)
+        
+        Returns:
+            생성된 시도 기록 ID
+        """
+        cursor = self.conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO quiz_attempts
+            (schedule_id, notification_index, user_answers, correct_answers, score, is_passed)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            schedule_id,
+            notification_index,
+            json.dumps(user_answers),
+            json.dumps(correct_answers),
+            score,
+            is_passed
+        ))
+        
+        self.conn.commit()
+        attempt_id = cursor.lastrowid
+        
+        print(f"📝 퀴즈 시도 기록 저장 완료 (ID: {attempt_id}, 점수: {score}점)")
+        return attempt_id
+    
+    def get_quiz_attempts(self, schedule_id: int) -> List[Dict]:
+        """특정 스케줄의 퀴즈 시도 기록 조회"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM quiz_attempts
+            WHERE schedule_id = ?
+            ORDER BY attempted_at DESC
+        ''', (schedule_id,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def add_retry_schedule(
+        self,
+        schedule_id: int,
+        notification_index: int,
+        retry_date: str,
+        retry_count: int = 1
+    ) -> int:
+        """
+        오답 재발송 스케줄 추가
+        
+        Args:
+            schedule_id: 스케줄 ID
+            notification_index: 알림 차수
+            retry_date: 재발송 날짜 (YYYY-MM-DD)
+            retry_count: 재시도 횟수
+        
+        Returns:
+            생성된 재발송 스케줄 ID
+        """
+        cursor = self.conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO retry_schedules
+            (schedule_id, notification_index, retry_date, retry_count)
+            VALUES (?, ?, ?, ?)
+        ''', (schedule_id, notification_index, retry_date, retry_count))
+        
+        self.conn.commit()
+        retry_id = cursor.lastrowid
+        
+        print(f"🔄 재발송 스케줄 추가 완료 (ID: {retry_id}, 날짜: {retry_date})")
+        return retry_id
+    
+    def get_retry_count(self, schedule_id: int, notification_index: int) -> int:
+        """특정 알림의 재시도 횟수 조회"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT COUNT(*) FROM retry_schedules
+            WHERE schedule_id = ? AND notification_index = ?
+        ''', (schedule_id, notification_index))
+        
+        return cursor.fetchone()[0]
+    
+    def get_retry_schedules_for_date(self, date: str) -> List[Dict]:
+        """특정 날짜에 재발송할 스케줄 조회"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM retry_schedules
+            WHERE retry_date = ? AND status = 'pending'
+            ORDER BY created_at ASC
+        ''', (date,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def mark_retry_as_completed(self, retry_id: int):
+        """재발송 스케줄 완료 처리"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            UPDATE retry_schedules
+            SET status = 'completed'
+            WHERE id = ?
+        ''', (retry_id,))
+        self.conn.commit()
+        
     def get_similar_recommendations(self, category: str, limit: int = 3) -> List[Dict]:
         """
         동일한 카테고리의 다른 추천 콘텐츠 조회
