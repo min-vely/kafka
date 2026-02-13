@@ -6,7 +6,6 @@ from typing import Any, Dict
 from dotenv import load_dotenv
 from langchain_upstage import ChatUpstage
 from langchain_core.tools import tool
-from pydantic import TypeAdapter, HttpUrl
 
 try:
     from tavily import TavilyClient
@@ -198,7 +197,7 @@ def extract_content_node(state):
                 "messages": "안전하지 않은 콘텐츠로 판단되어 중단합니다."
             }
 
-        # 성공적으로 통과한 경우 리턴 (딕셔너리 형태 권장)
+        # 성공적으로 통과한 경우 리턴
         return {
             "input_text": content,
             "is_valid": True,
