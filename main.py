@@ -138,6 +138,7 @@ def main():
     if target_url:
         initial_state["url"] = target_url
     
+    print("\n🚀 Kafka AI 워크플로우를 시작합니다...")
     result = graph.invoke(initial_state)
     pretty_print(result)
 

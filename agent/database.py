@@ -281,6 +281,26 @@ class ScheduleDB:
             'total_notifications_sent': sent
         }
     
+    def get_similar_recommendations(self, category: str, limit: int = 3) -> List[Dict]:
+        """
+        동일한 카테고리의 다른 추천 콘텐츠 조회
+        
+        Args:
+            category: 콘텐츠 유형
+            limit: 추천 개수
+        """
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT url, summary, persona_style 
+            FROM schedules 
+            WHERE category = ? AND url IS NOT NULL
+            ORDER BY RANDOM() 
+            LIMIT ?
+        ''', (category, limit))
+        
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    
     def close(self):
         """DB 연결 종료"""
         self.conn.close()
