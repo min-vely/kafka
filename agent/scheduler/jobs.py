@@ -12,7 +12,7 @@ import json
 
 def send_daily_notifications():
     """
-    매일 오전 8시에 실행되는 메인 작업
+    매일 오전 8시에 실행되는 메인 작업 
     
     동작:
     1. DB에서 오늘 발송할 스케줄 조회
@@ -36,22 +36,40 @@ def send_daily_notifications():
         # 오늘 발송할 스케줄 조회
         schedules = db.get_schedules_for_date(today)
         
-        if not schedules:
+        # 오늘 재발송할 스케줄 조회
+        retry_schedules = db.get_retry_schedules_for_date(today)
+        
+        total_count = len(schedules) + len(retry_schedules)
+        
+        if total_count == 0:
             print(f"📭 오늘 발송할 알림이 없습니다.")
             return
         
-        print(f"📬 발송 대상: {len(schedules)}개 스케줄\n")
+        print(f"📬 발송 대상: {len(schedules)}개 스케줄, {len(retry_schedules)}개 재발송\n")
         
-        # 각 스케줄에 대해 알림 발송
         success_count = 0
         fail_count = 0
         
+        # 정규 스케줄 발송
         for schedule in schedules:
             try:
                 send_notification_for_schedule(schedule, today)
                 success_count += 1
             except Exception as e:
                 print(f"❌ 스케줄 {schedule['id']} 발송 실패: {e}")
+                fail_count += 1
+        
+        # 재발송 스케줄 처리
+        for retry in retry_schedules:
+            try:
+                schedule = db.get_schedule_by_id(retry['schedule_id'])
+                if schedule:
+                    print(f"🔄 재발송: 스케줄 {retry['schedule_id']}, {retry['notification_index']}차 (시도 {retry['retry_count']}회)")
+                    send_notification_for_schedule(schedule, today, notification_index=retry['notification_index'])
+                    db.mark_retry_as_completed(retry['id'])
+                    success_count += 1
+            except Exception as e:
+                print(f"❌ 재발송 실패 (retry_id: {retry['id']}): {e}")
                 fail_count += 1
         
         print(f"\n{'='*60}")
@@ -64,13 +82,14 @@ def send_daily_notifications():
         traceback.print_exc()
 
 
-def send_notification_for_schedule(schedule: Dict, target_date: str):
+def send_notification_for_schedule(schedule: Dict, target_date: str, notification_index: int = None):
     """
     특정 스케줄에 대해 알림 발송
     
     Args:
         schedule: 스케줄 정보 딕셔너리
         target_date: 발송 대상 날짜 (YYYY-MM-DD)
+        notification_index: 알림 차수 (재발송 시 직접 지정, 선택)
     
     동작:
     1. schedule_dates에서 몇 번째 알림인지 확인
@@ -85,12 +104,13 @@ def send_notification_for_schedule(schedule: Dict, target_date: str):
     schedule_id = schedule['id']
     schedule_dates = json.loads(schedule['schedule_dates'])
     
-    # 몇 번째 알림인지 확인
-    try:
-        notification_index = schedule_dates.index(target_date) + 1  # 1부터 시작
-    except ValueError:
-        print(f"⚠️  스케줄 {schedule_id}: 날짜 {target_date}를 찾을 수 없음")
-        return
+    # 몇 번째 알림인지 확인 (재발송 시에는 직접 전달받음)
+    if notification_index is None:
+        try:
+            notification_index = schedule_dates.index(target_date) + 1  # 1부터 시작
+        except ValueError:
+            print(f"⚠️  스케줄 {schedule_id}: 날짜 {target_date}를 찾을 수 없음")
+            return
     
     db = get_db()
     
@@ -104,23 +124,40 @@ def send_notification_for_schedule(schedule: Dict, target_date: str):
     try:
         # 알림 제목 및 내용 생성
         category = schedule.get('category', '지식형')
-        persona_style = schedule.get('persona_style', '친근한 친구')
         styled_content = schedule.get('styled_content', '')
+        
+        # 페르소나를 notification_index에 맞게 선택
+        persona_map = {
+            1: "친근한 친구",
+            2: "다정한 선배",
+            3: "엄격한 교수",
+            4: "유머러스한 코치",
+            5: "밈 마스터"  # 예비 (재발송 시)
+        }
+        persona_style = persona_map.get(notification_index, "친근한 친구")
         
         emoji = "🎓" if category == "지식형" else "💭"
         title = f"{emoji} 카프카 {notification_index}차 복습 알림 ({persona_style})"
         
-        # 메시지 길이 제한
-        if len(styled_content) > 200:
-            message = styled_content[:197] + "..."
+        # 메시지 및 URL 생성
+        quiz_url = None
+        if category == "지식형":
+            # 정보형: 퀴즈 URL 포함
+            quiz_url = f"http://localhost:8080/quiz/{schedule_id}/{notification_index}"
+            message = f"📝 오늘의 퀴즈가 준비되었습니다!\n\n{notification_index}번째 문제를 풀러 가세요 (클릭하면 자동으로 열립니다)"
         else:
-            message = styled_content
+            # 힐링형: 기존 방식
+            if len(styled_content) > 200:
+                message = styled_content[:197] + "..."
+            else:
+                message = styled_content
         
-        # 팝업 발송
+        # 팝업 발송 (클릭 시 자동으로 웹페이지 열림)
         send_popup_notification(
             title=title,
             message=message,
-            timeout=10
+            timeout=30,  # 30초 표시
+            url=quiz_url  # 정보형일 때만 URL 전달
         )
         
         # 발송 성공 로그
