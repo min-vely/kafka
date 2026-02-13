@@ -13,5 +13,5 @@ apscheduler
 flask
 pync  # macOS 클릭 가능한 알림
 win10toast  # Windows 클릭 가능한 알림
-
-
+tavily-python
+pyobjc
