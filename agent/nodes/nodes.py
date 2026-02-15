@@ -13,6 +13,7 @@ except ImportError:
     TavilyClient = None
 
 from agent.prompts import (
+    SAFETY_PROMPT, #extract_content 노드에서 콘텐츠 안전도 검사하는 프롬프트 추가
     SUMMARY_DRAFT_PROMPT,
     QUIZ_FROM_SUMMARY_PROMPT,
     JUDGE_PROMPT,
@@ -25,7 +26,15 @@ from agent.prompts import (
     PERSONA_DEFINITIONS,
     PERSONA_APPLY_PROMPT,
 )
-from agent.utils import calculate_ebbinghaus_dates
+#input_url노드, extract_content노드 추가하면서 유틸리티 목록 수정
+from agent.utils import (
+    is_valid_url,
+    is_youtube_url,
+    extract_youtube_video_id,
+    get_youtube_transcript,
+    get_article_content,
+    calculate_ebbinghaus_dates
+)
 from agent.rag import verify_summary_with_rag
 from agent.database import get_db
 
@@ -93,8 +102,114 @@ llm = ChatUpstage(
 # -----------------------------
 # Nodes
 # -----------------------------
+def input_url_node(state):
+    """1) 입력이 URL이면 검증하고, 텍스트면 그대로 통과시키는 지능형 노드"""
+    # main에서 던져준 'user_input'을 가져옵니다.
+    user_input = state.get("user_input", "").strip()
+
+    # www.로 시작하면 앞에 https:// 를 붙여서 URL로 만들어줍니다.
+    # 이렇게 해야 아래 1번 IF문(http 시작 체크)에 걸립니다!
+    if user_input.startswith("www."):
+        user_input = "https://" + user_input
+
+    # 1. URL 형태인지 확인
+    if user_input.startswith(("http://", "https://")):
+        if is_valid_url(user_input):
+            # 유효한 URL인 경우
+            return {
+                "url": user_input,
+                "is_valid": True,
+                "messages": "URL 확인 완료! 본문을 추출하러 갑니다."
+            }
+        else:
+            # URL 형태인데 가짜인 경우 (진짜 에러)
+            return {
+                "is_valid": False,
+                "messages": "유효하지 않은 URL 형식입니다. 주소를 확인해주세요."
+            }
+
+    # 2. URL이 아니고 진짜 텍스트인 경우
+    elif len(user_input) > 0:
+        # 일반 텍스트인 경우 (통과!)
+        # input_text 칸이 비어있을 수도 있으니 여기에 채워줍니다.
+        return {
+            "input_text": user_input,
+            "is_valid": True,
+            "messages": "텍스트 입력을 확인했습니다. 추출 단계를 건너뛰고 분석합니다."
+        }
+
+    # 3. 아무것도 안 들어온 경우
+    return {
+        "is_valid": False,
+        "messages": "입력된 내용이 없습니다."
+    }
+
+def extract_content_node(state):
+    """
+    2) 콘텐츠 확보 및 LLM 유해성 검증 노드
+
+    진행 단계:
+    1. 데이터 확인:
+       - URL이 있으면 YouTube/아티클에서 본문 추출
+       - 이미 input_text가 있으면 추출 단계 건너뜀 (직접 입력/파일 대응)
+    2. 콘텐츠 검증:
+       - 추출되거나 입력된 텍스트 상위 2,000자를 바탕으로 LLM Safety 검사 수행
+    3. 상태 업데이트:
+       - 검증 결과에 따라 is_safe 플래그 설정 및 최종 본문 저장
+    """
+    url = state.get("url")
+    content = state.get("input_text", "").strip()
+
+    # 1. 이미 본문이 있다면 (직접 입력 or 파일) 추출 건너뛰기
+    if content and not url:
+        print("이미 본문 텍스트가 존재합니다. 추출 단계를 생략합니다.")
+
+    # 2. URL이 있는 경우에만 추출 실행
+    elif url:
+        try:
+            if is_youtube_url(url):
+                video_id = extract_youtube_video_id(url)
+                content = get_youtube_transcript(video_id)
+            else:
+                content = get_article_content(url)
+        except Exception as e:
+            return {
+                "input_text": f"Error: {str(e)}",
+                "is_valid": False,
+                "messages": "콘텐츠 추출 중 오류가 발생했습니다."
+            }
+
+    # 3. 추출된 내용이 아예 없는 경우 방어
+    if not content:
+        return {"is_valid": False, "messages": "분석할 콘텐츠가 없습니다."}
+
+    # 4. Safety Check (LLM활용)
+    try:
+        check_text = content[:2000]
+        safety_llm = llm.invoke(SAFETY_PROMPT + "\n\n[CONTENT]\n" + check_text)
+        safety_response = (safety_llm.content or "").strip().upper()
+
+        if "UNSAFE" in safety_response:
+            return {
+                "input_text": "Error: 유해 콘텐츠 감지",
+                "is_valid": False,
+                "is_safe": False,
+                "messages": "안전하지 않은 콘텐츠로 판단되어 중단합니다."
+            }
+
+        # 성공적으로 통과한 경우 리턴
+        return {
+            "input_text": content,
+            "is_valid": True,
+            "is_safe": True,
+            "messages": "콘텐츠 추출 및 안전성 검사 완료!"
+        }
+
+    except Exception as e:
+        return {"is_valid": False, "is_safe": False, "messages": f"Safety Check 에러: {str(e)}"}
+
 def classify_node(state):
-    """0) 콘텐츠 성격을 분석하여 '지식형' 또는 '힐링형'으로 분류 (CoT 적용)"""
+    """3) 콘텐츠 성격을 분석하여 '지식형' 또는 '힐링형'으로 분류 (CoT 적용)"""
     print("\n[Node] classify_node: 콘텐츠 분류 중...")
     article = state["input_text"]
     resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + article[:2000])
@@ -113,7 +228,7 @@ def classify_node(state):
 
 
 def synthesize_node(state):
-    """1) 기사 원문으로 요약 초안(draft_summary)만 생성 (RAG 사용 X)"""
+    """4) 기사 원문으로 요약 초안(draft_summary)만 생성 (RAG 사용 X)"""
     print("[Node] synthesize_node: 요약 초안 생성 중...")
     article = state["input_text"]
 
@@ -125,7 +240,7 @@ def synthesize_node(state):
 
 
 def verify_node(state):
-    """2) 요약 초안을 RAG로 검증(근거 문맥 구성/문장 검증 결과 저장)"""
+    """5) 요약 초안을 RAG로 검증(근거 문맥 구성/문장 검증 결과 저장)"""
     print("[Node] verify_node: RAG 검증 및 벡터 DB 생성 중 (시간이 소요될 수 있습니다)...")
     article = state["input_text"]
     draft = state.get("draft_summary", "")
@@ -159,7 +274,6 @@ def verify_node(state):
         ensure_ascii=False,
     )
 
-
     # 컨텍스트가 비었거나 unsupported가 있으면 개선 루프
     state["needs_improve"] = (not str(state["context"]).strip()) or (len(state["unsupported_sentences"]) > 0)
 
@@ -167,7 +281,7 @@ def verify_node(state):
 
 
 def judge_node(state):
-    """3) 검증된 CONTEXT vs SUMMARY faithfulness 채점"""
+    """6) 검증된 CONTEXT vs SUMMARY faithfulness 채점"""
     context = state.get("context", "")
     summary_json = state.get("summary", "")
 
@@ -203,7 +317,7 @@ def judge_node(state):
 
 
 def improve_node(state):
-    """4) CONTEXT 기반으로 draft_summary(초안) 개선"""
+    """7) CONTEXT 기반으로 draft_summary(초안) 개선"""
     max_improve = int(state.get("max_improve", 2))
     count = int(state.get("improve_count", 0))
 
