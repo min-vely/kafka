@@ -9,8 +9,6 @@ kafka/
 ├── main.py                    # 메인 워크플로우 진입점
 ├── requirements.txt           # Python 의존성
 ├── .env                       # 환경 변수 (API 키)
-├── run.sh                     # 실행 스크립트 (Unix)
-├── Makefile                   # 실행 스크립트 (Make)
 │
 ├── agent/                     # 핵심 AI 에이전트
 │   ├── database.py           # SQLite 데이터베이스 관리
@@ -60,38 +58,35 @@ UPSTAGE_API_KEY=your_api_key_here
 
 ### 3. 콘텐츠 처리
 ```bash
-# 방법 1: Makefile
-make main ARGS='--text "AI는 인공지능입니다"'
+# 텍스트 직접 입력
+python3 main.py --text "AI는 인공지능입니다. 머신러닝은 AI의 하위 분야입니다."
 
-# 방법 2: run.sh
-./run.sh main --text "AI는 인공지능입니다"
-
-# 방법 3: 직접 실행
-python3 main.py --text "AI는 인공지능입니다"
+# URL로 처리
+python3 main.py --url "https://example.com/article"
 ```
 
 ### 4. 웹 서버 실행 (터미널 1)
 ```bash
-# 방법 1: Makefile
-make web ARGS='--port 8080'
+# 기본 포트 (5000)
+python3 -m web.web_server
 
-# 방법 2: run.sh
-./run.sh web --port 8080
-
-# 방법 3: 직접 실행
+# 8080 포트 사용 (macOS AirPlay 충돌 회피 권장)
 python3 -m web.web_server --port 8080
+
+# 디버그 모드 끄기
+python3 -m web.web_server --port 8080 --no-debug
 ```
 
 ### 5. 스케줄러 실행 (터미널 2)
 ```bash
-# 방법 1: Makefile (테스트 모드)
-make scheduler ARGS='--test'
-
-# 방법 2: run.sh
-./run.sh scheduler --test
-
-# 방법 3: 직접 실행
+# 테스트 모드 (즉시 1회 실행)
 python3 -m agent.scheduler.scheduler_service --test
+
+# 프로덕션 모드 (매일 오전 8시 자동 실행)
+python3 -m agent.scheduler.scheduler_service
+
+# 디버깅 모드 (10초마다 실행)
+python3 -m agent.scheduler.scheduler_service --interval 10
 ```
 
 ## 📋 주요 기능
@@ -119,16 +114,12 @@ python3 -m agent.scheduler.scheduler_service --test
 
 ### 데이터베이스 테스트
 ```bash
-make test-db
-# 또는
-./run.sh test-db
+python3 tests/test_database.py
 ```
 
 ### 팝업 알림 테스트
 ```bash
-make test-popup
-# 또는
-./run.sh test-popup
+python3 tests/test_popup.py
 ```
 
 ## 📚 문서
