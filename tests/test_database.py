@@ -16,7 +16,7 @@ def test_basic_operations():
     print("="*60)
     
     # 테스트용 DB (별도 파일)
-    db = ScheduleDB('test_kafka.db')
+    db = ScheduleDB('data/test_kafka.db')
     
     # 1. 스케줄 저장
     print("\n📝 테스트 1: 스케줄 저장")
@@ -84,8 +84,8 @@ def test_basic_operations():
     print("\n" + "="*60)
     print("✅ 모든 테스트 통과!")
     print("="*60)
-    print("\n💡 생성된 파일: test_kafka.db")
-    print("   확인: sqlite3 test_kafka.db")
+    print("\n💡 생성된 파일: data/test_kafka.db")
+    print("   확인: sqlite3 data/test_kafka.db")
     print("        .tables")
     print("        SELECT * FROM schedules;")
 
@@ -96,7 +96,7 @@ def test_multiple_users():
     print("🧪 다중 사용자 테스트")
     print("="*60)
     
-    db = ScheduleDB('test_kafka.db')
+    db = ScheduleDB('data/test_kafka.db')
     
     # 여러 사용자 추가
     users = [

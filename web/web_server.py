@@ -16,7 +16,7 @@ import sys
 import os
 
 # 프로젝트 루트를 Python 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from web.app import app
 
@@ -69,7 +69,7 @@ def main():
     print()
     print("💡 팁:")
     print("   1. 웹 서버를 먼저 실행하세요")
-    print("   2. 스케줄러로 알림을 발송하세요 (python3 scheduler_service.py --test)")
+    print("   2. 스케줄러로 알림을 발송하세요 (python3 -m agent.scheduler.scheduler_service --test)")
     print("   3. 팝업 알림의 URL을 클릭하면 이 서버로 연결됩니다")
     print()
     print("⚠️  주의: Ctrl+C로 종료하세요")

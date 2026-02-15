@@ -22,7 +22,7 @@ import sys
 import os
 
 # 프로젝트 루트를 Python 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 def main():
@@ -76,8 +76,8 @@ def main():
         sys.exit(1)
     
     # DB 파일 존재 확인
-    if not os.path.exists('kafka.db'):
-        print("⚠️  경고: kafka.db 파일이 없습니다.")
+    if not os.path.exists('data/kafka.db'):
+        print("⚠️  경고: data/kafka.db 파일이 없습니다.")
         print("   먼저 main.py를 실행하여 스케줄을 생성하세요.\n")
     
     # 스케줄러 시작
