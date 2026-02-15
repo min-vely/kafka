@@ -26,12 +26,12 @@ try:
 except ImportError:
     PYNC_AVAILABLE = False
 
-# Windows용 클릭 가능한 알림
+# Windows용 클릭 가능한 알림 (안정적)
 try:
-    from win10toast import ToastNotifier
-    WIN10TOAST_AVAILABLE = True
+    from winotify import Notification, audio
+    WINOTIFY_AVAILABLE = True
 except ImportError:
-    WIN10TOAST_AVAILABLE = False
+    WINOTIFY_AVAILABLE = False
 
 # 기본 알림 (클릭 불가)
 try:
@@ -41,7 +41,7 @@ except ImportError:
     PLYER_AVAILABLE = False
     print("⚠️  알림 라이브러리가 설치되지 않았습니다.")
     print("   macOS: pip3 install pync")
-    print("   Windows: pip3 install win10toast")
+    print("   Windows: pip install winotify")
     print("   기타: pip3 install plyer")
 
 
@@ -64,7 +64,7 @@ def send_popup_notification(
     
     동작:
         - macOS: pync 알림 (클릭 시 URL 열기)
-        - Windows: win10toast 알림 (클릭 시 URL 열기)
+        - Windows: winotify 알림 (클릭 시 URL 열기 - 안정적)
         - 기타: plyer 알림 (클릭 불가)
     
     이유:
@@ -92,22 +92,25 @@ def send_popup_notification(
             print(f"   제목: {title}")
             print(f"   클릭 시 열림: {url}")
         
-        # Windows: win10toast 사용 (클릭 시 URL 열기)
-        elif OS_TYPE == 'Windows' and WIN10TOAST_AVAILABLE and url:
-            import webbrowser
-            
-            def open_url():
-                """알림 클릭 시 실행될 콜백"""
-                webbrowser.open(url)
-            
-            toaster = ToastNotifier()
-            toaster.show_toast(
-                title,
-                message,
-                duration=timeout,
-                threaded=True,
-                callback_on_click=open_url
+        # Windows: winotify 사용 (클릭 시 URL 열기 - 안정적)
+        elif OS_TYPE == 'Windows' and WINOTIFY_AVAILABLE and url:
+            toast = Notification(
+                app_id="카프카 AI",
+                title=title,
+                msg=message,
+                duration="short" if timeout <= 5 else "long",
+                icon=app_icon
             )
+            
+            # 클릭 시 URL 열기 액션 추가
+            toast.set_audio(audio.Default, loop=False)
+            toast.add_actions(
+                label="퀴즈 풀기",
+                launch=url
+            )
+            
+            toast.show()
+            
             print(f"✅ [Windows - 클릭 가능] 알림 발송 성공!")
             print(f"   제목: {title}")
             print(f"   클릭 시 열림: {url}")

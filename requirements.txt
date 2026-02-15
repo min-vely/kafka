@@ -12,6 +12,6 @@ plyer
 apscheduler
 flask
 pync  # macOS 클릭 가능한 알림
-win10toast  # Windows 클릭 가능한 알림
+winotify  # Windows 클릭 가능한 알림 (안정적)
 tavily-python
 pyobjc

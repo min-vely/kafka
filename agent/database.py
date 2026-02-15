@@ -26,12 +26,12 @@ class ScheduleDB:
     - 발송 이력 추적
     """
     
-    def __init__(self, db_path: str = 'kafka.db'):
+    def __init__(self, db_path: str = 'data/kafka.db'):
         """
         DB 초기화 및 테이블 생성
         
         Args:
-            db_path: DB 파일 경로 (기본: kafka.db)
+            db_path: DB 파일 경로 (기본: data/kafka.db)
         """
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
