@@ -26,6 +26,7 @@ try:
 except Exception:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
 
+
 def build_vectorstore(text: str) -> FAISS:
     """기사 원문을 청크로 쪼개 임베딩한 뒤, FAISS 벡터스토어를 생성합니다."""
     splitter = RecursiveCharacterTextSplitter(
@@ -40,8 +41,6 @@ def build_vectorstore(text: str) -> FAISS:
         api_key=os.environ["UPSTAGE_API_KEY"],
     )
     return FAISS.from_texts(chunks, embeddings)
-
-
 
 
 def rewrite_query(llm: ChatUpstage, article_text: str) -> str:
@@ -70,7 +69,6 @@ def rewrite_query(llm: ChatUpstage, article_text: str) -> str:
     return content
 
 
-
 def _to_relevance(score: float) -> float:
     """FAISS score를 0~1 relevance로 변환."""
     try:
@@ -88,27 +86,25 @@ def _clean_llm_query_output(s: str, max_len: int = 160) -> str:
     s = re.sub(r"^\s*query\s*:\s*", "", s, flags=re.IGNORECASE)
 
     # 2) 큰 블록이 시작되는 지점에서 '잘라내기'
-    #    (아래 키워드가 나오면 그 이전까지만 남김)
     cut_markers = [
-        "\n",                # 여러 줄이면 첫 줄만
-        "citations:",        # citations 블록 제거
-        "**최종",            # **최종 출력**, **최종 답변** 제거
-        "최종 출력",         # 한글 최종 출력
-        "시스템 요구사항",    # 시스템 요구사항 준수... 제거
-        "(※",                # 주석/설명 제거
+        "\n",
+        "citations:",
+        "**최종",
+        "최종 출력",
+        "시스템 요구사항",
+        "(※",
     ]
     for m in cut_markers:
         if m in s:
             s = s.split(m, 1)[0].strip()
 
-    # 3) 따옴표로 시작하는 '두 번째 덩어리'가 붙는 경우(너 로그 케이스) 잘라내기
+    # 3) 따옴표로 시작하는 '두 번째 덩어리'가 붙는 경우 잘라내기
     if ' "' in s:
         s = s.split(' "', 1)[0].strip()
     if '"' in s and s.count('"') >= 1:
-        # 중간에 따옴표가 나오면 뒤는 버리기 (LLM이 "..." 블록을 붙일 때)
         s = s.split('"', 1)[0].strip()
 
-    # 4) 메타 문구 제거 (남아 있으면)
+    # 4) 메타 문구 제거
     s = re.sub(r"\*\*최종\s*답변\*\*|최종\s*답변|실제\s*답변", "", s).strip()
 
     # 5) 공백/따옴표 정리
@@ -120,7 +116,6 @@ def _clean_llm_query_output(s: str, max_len: int = 160) -> str:
         s = s[:max_len].rstrip(" ,.;")
 
     return s
-
 
 
 # -----------------------------
@@ -142,7 +137,9 @@ def retrieve_candidates(vs: FAISS, query: str, k: int = 8) -> List[Dict[str, Any
     return cands
 
 
-def rerank_with_llm(llm: ChatUpstage, query: str, candidates: List[Dict[str, Any]], take: int = 4) -> List[Dict[str, Any]]:
+def rerank_with_llm(
+    llm: ChatUpstage, query: str, candidates: List[Dict[str, Any]], take: int = 4
+) -> List[Dict[str, Any]]:
     """
     LLM으로 후보를 재정렬합니다.
     RERANK_PROMPT는 ["C3","C1",...] 같은 id 리스트를 반환하도록 설계되어야 함.
@@ -150,7 +147,10 @@ def rerank_with_llm(llm: ChatUpstage, query: str, candidates: List[Dict[str, Any
     """
     payload = {
         "query": query,
-        "candidates": [{"id": c["id"], "text": (c["text"][:400] if c.get("text") else "")} for c in candidates],
+        "candidates": [
+            {"id": c["id"], "text": (c["text"][:400] if c.get("text") else "")}
+            for c in candidates
+        ],
     }
 
     resp = llm.invoke(RERANK_PROMPT + "\n\n" + json.dumps(payload, ensure_ascii=False))
@@ -164,15 +164,19 @@ def rerank_with_llm(llm: ChatUpstage, query: str, candidates: List[Dict[str, Any
         picked_ids = []
 
     if not picked_ids:
-        # fallback: relevance 높은 순
-        picked_ids = [c["id"] for c in sorted(candidates, key=lambda x: x["relevance"], reverse=True)[:take]]
+        picked_ids = [
+            c["id"]
+            for c in sorted(candidates, key=lambda x: x["relevance"], reverse=True)[:take]
+        ]
 
     id2 = {c["id"]: c for c in candidates}
     ranked = [id2[i] for i in picked_ids if i in id2]
     return ranked[:take]
 
 
-def pack_context(ranked: List[Dict[str, Any]], max_chars: int = 2800) -> Tuple[str, List[Dict[str, Any]]]:
+def pack_context(
+    ranked: List[Dict[str, Any]], max_chars: int = 2800
+) -> Tuple[str, List[Dict[str, Any]]]:
     """
     선정된 근거를 [C#] 마커와 함께 프롬프트에 넣기 좋은 문자열로 합칩니다.
     반환: (context_str, citations=[{"id": "C1", "text": "..."}...])
@@ -214,7 +218,9 @@ class KafkaMiniRetriever(BaseRetriever):
         if not filtered:
             return []
 
-        ranked = rerank_with_llm(self.llm, query=query, candidates=filtered, take=self.rerank_top)
+        ranked = rerank_with_llm(
+            self.llm, query=query, candidates=filtered, take=self.rerank_top
+        )
 
         docs: List[Document] = []
         for c in ranked:
@@ -249,8 +255,6 @@ def retrieve_context(
     vs = build_vectorstore(article_text)
     query = rewrite_query(llm, article_text)
 
-    # 디버그 (공백/줄바꿈 포함 확인)
-
     retriever = KafkaMiniRetriever(
         vectorstore=vs,
         llm=llm,
@@ -281,6 +285,97 @@ def retrieve_context(
     return query, context, citations
 
 
+# -----------------------------
+# (NEW) 3.5) A/B helpers
+# -----------------------------
+def _make_rag_summary(llm: ChatUpstage, context: str) -> str:
+    """
+    CONTEXT만을 근거로 간결 요약을 생성합니다.
+    (규칙: 컨텍스트 외 정보 추가 금지)
+    """
+    context = (context or "").strip()
+    if not context:
+        return ""
+
+    prompt = (
+        "당신은 주어진 CONTEXT만을 근거로 요약하는 시스템입니다.\n"
+        "규칙:\n"
+        "- CONTEXT에 없는 내용은 절대 추가하지 마세요.\n"
+        "- 3문장으로 간결하게 요약하세요.\n"
+        "- 과장/추측/일반론 금지.\n\n"
+        f"CONTEXT:\n{context}\n\n"
+        "출력: 3문장 요약"
+    )
+
+    resp = llm.invoke(prompt)
+    try:
+        return (resp.content or "").strip()
+    except Exception:
+        return str(resp).strip()
+
+
+def _judge_pick_best(
+    llm: ChatUpstage, llm_summary: str, rag_summary: str, context: str
+) -> Dict[str, Any]:
+    """
+    LLM 요약 vs RAG 요약 중 더 나은 것을 선택합니다.
+    우선순위: 근거일치/사실성 > 핵심 커버리지 > 간결성
+    """
+    llm_summary = (llm_summary or "").strip()
+    rag_summary = (rag_summary or "").strip()
+    context = (context or "").strip()
+
+    if llm_summary and not rag_summary:
+        return {"winner": "llm", "reason": "rag_summary_empty"}
+    if rag_summary and not llm_summary:
+        return {"winner": "rag", "reason": "llm_summary_empty"}
+    if not llm_summary and not rag_summary:
+        return {"winner": "llm", "reason": "both_empty"}
+
+    prompt = (
+        "너는 요약 심사위원이다. CONTEXT만을 기준으로 두 요약을 평가해 더 좋은 것을 고른다.\n"
+        "평가 기준(중요도 순):\n"
+        "1) 사실성/근거일치: CONTEXT에 없는 내용을 말하면 큰 감점\n"
+        "2) 핵심 커버리지: 중요한 정보가 빠지면 감점\n"
+        "3) 간결성: 불필요한 말이 많으면 감점\n\n"
+        "반드시 JSON으로만 답하라.\n"
+        '형식: {"winner":"A"|"B","scoreA":0-10,"scoreB":0-10,"reason":"짧게"}\n\n'
+        f"CONTEXT:\n{context}\n\n"
+        f"A (LLM_SUMMARY):\n{llm_summary}\n\n"
+        f"B (RAG_SUMMARY):\n{rag_summary}\n"
+    )
+
+    resp = llm.invoke(prompt)
+
+    raw = ""
+    try:
+        raw = (resp.content or "").strip()
+    except Exception:
+        raw = str(resp).strip()
+
+    try:
+        data = json.loads(raw)
+        winner = data.get("winner")
+        if winner == "A":
+            return {
+                "winner": "llm",
+                "scoreA": data.get("scoreA"),
+                "scoreB": data.get("scoreB"),
+                "reason": data.get("reason", ""),
+            }
+        if winner == "B":
+            return {
+                "winner": "rag",
+                "scoreA": data.get("scoreA"),
+                "scoreB": data.get("scoreB"),
+                "reason": data.get("reason", ""),
+            }
+    except Exception:
+        pass
+
+    # 파싱 실패 시: 근거 기반을 우선(안전)
+    return {"winner": "rag", "reason": "judge_parse_failed"}
+
 
 # -----------------------------
 # 4) Public: verify_summary_with_rag()
@@ -309,27 +404,57 @@ def verify_summary_with_rag(
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
-    요약 검증(RAG):
-    - 요약을 문장 단위로 쪼갬
-    - 각 문장을 쿼리로 FAISS에서 근거 청크 검색
-    - 근거가 있는 문장은 [C#]를 붙여 verified_summary 생성
-    - 전체 context/citations/used_citations/unsupported_sentences 반환
-
-    nodes.py가 기대하는 키:
-    - verified_summary
-    - context
-    - citations
-    - used_citations
-    - unsupported_sentences
+    요약 검증(RAG) + (NEW) LLM요약 vs RAG요약 A/B 선택:
+    - LLM 요약(summary_draft) 후보와, CONTEXT 기반 RAG 요약 후보를 각각 생성
+    - 심판 LLM이 더 좋은 후보를 선택
+    - 선택된 요약을 문장 단위로 쪼개 각 문장별 근거를 찾아 [C#] 부착
+    - 반환: verified_summary/context/citations/used_citations/unsupported_sentences (+디버그 키)
     """
     vs = build_vectorstore(article_text)
-    # 관측/디버깅용: 기사 전체 기반 1문장 검색 쿼리(verify 루프에서 직접 사용하진 않음)
     global_query = rewrite_query(llm, article_text)
-
 
     # 🔧 수정 사항/주석 블록 제거 (최종 요약만 검증)
     summary_draft = (summary_draft or "").split("※ 수정 사항:")[0].strip()
-    #
+
+    # -----------------------------
+    # (NEW) A/B: LLM 요약 vs RAG 요약 생성 & 선택
+    # -----------------------------
+    llm_summary_candidate = summary_draft
+
+    # 기사 전체 기반 context 구성 (전역 RAG 요약 생성용)
+    _q, global_context, _global_citations = retrieve_context(
+        llm=llm,
+        article_text=article_text,
+        top_k=top_k,
+        rerank_top=rerank_top,
+        relevance_threshold=relevance_threshold,
+        max_context_chars=max_context_chars,
+    )
+
+    rag_summary_candidate = _make_rag_summary(llm, global_context)
+
+    judge_ab = _judge_pick_best(
+        llm=llm,
+        llm_summary=llm_summary_candidate,
+        rag_summary=rag_summary_candidate,
+        context=global_context,
+    )
+
+    if judge_ab.get("winner") == "rag":
+        summary_draft = rag_summary_candidate or llm_summary_candidate
+        chosen_source = "rag"
+    else:
+        summary_draft = llm_summary_candidate or rag_summary_candidate
+        chosen_source = "llm"
+
+    # ✅ 디버그 로그 (A/B 선택 확인용)
+    print(
+        f"[RAG-A/B] chosen={chosen_source} "
+        f"scoreA={judge_ab.get('scoreA')} "
+        f"scoreB={judge_ab.get('scoreB')} "
+        f"reason={judge_ab.get('reason')}"
+    )
+    
 
     sentences = _split_sentences_ko(summary_draft)
     if not sentences:
@@ -340,9 +465,13 @@ def verify_summary_with_rag(
             "citations": [],
             "used_citations": [],
             "unsupported_sentences": [],
+            # (NEW)
+            "llm_summary": llm_summary_candidate,
+            "rag_summary": rag_summary_candidate,
+            "chosen_summary_source": chosen_source,
+            "judge_ab": judge_ab,
         }
 
-    # 전역 근거 풀 (텍스트 중복 방지, C# 재사용)
     cite_text_to_id: Dict[str, str] = {}
     citations: List[Dict[str, Any]] = []
     used_citations: List[str] = []
@@ -357,10 +486,8 @@ def verify_summary_with_rag(
         citations.append({"id": cid, "text": t})
         return cid
 
-    # 문장별 근거 찾기
     verified_lines: List[str] = []
     for sent in sentences:
-        # 1) 후보 검색
         cands = retrieve_candidates(vs, query=sent, k=max(top_k, per_sentence_k))
         filtered = [c for c in cands if c["relevance"] >= relevance_threshold]
 
@@ -369,18 +496,20 @@ def verify_summary_with_rag(
             verified_lines.append(sent)
             continue
 
-        # 2) rerank (가능하면) → per_sentence_k만큼 선택
         try:
-            ranked = rerank_with_llm(llm, query=sent, candidates=filtered, take=max(per_sentence_k, 1))
+            ranked = rerank_with_llm(
+                llm, query=sent, candidates=filtered, take=max(per_sentence_k, 1)
+            )
         except Exception:
-            ranked = sorted(filtered, key=lambda x: x["relevance"], reverse=True)[: max(per_sentence_k, 1)]
+            ranked = sorted(filtered, key=lambda x: x["relevance"], reverse=True)[
+                : max(per_sentence_k, 1)
+            ]
 
-        # 3) citations 등록 + 문장에 부착
-        #    - 중복 chunk로 쏠림을 줄이기 위해 '서로 다른 텍스트'를 우선적으로 채택
-        #    - per_sentence_k만큼 못 채우면 threshold를 낮춰(완화) 추가 채택
         cids: List[str] = []
 
-        def _add_unique_from(rows: List[Dict[str, Any]], limit: int, relax_factor: float = 1.0):
+        def _add_unique_from(
+            rows: List[Dict[str, Any]], limit: int, relax_factor: float = 1.0
+        ):
             nonlocal cids
             if not rows:
                 return
@@ -394,16 +523,12 @@ def verify_summary_with_rag(
                 if not t:
                     continue
                 cid = _get_or_make_cid(t)
-                # 같은 citation id가 반복 부착되는 건 허용하되, 한 문장 내에서는 중복 제거
                 if cid not in cids:
                     cids.append(cid)
 
-        # 1차: rerank 결과에서 우선 채택
         _add_unique_from(ranked, per_sentence_k, relax_factor=1.0)
 
-        # 2차: 여전히 부족하면 (rerank 전에) filtered 후보에서 다양성 보충 (threshold 완화)
         if len(cids) < max(1, per_sentence_k):
-            # relevance 내림차순
             backup = sorted(filtered, key=lambda x: x["relevance"], reverse=True)
             _add_unique_from(backup, per_sentence_k, relax_factor=0.6)
 
@@ -412,15 +537,12 @@ def verify_summary_with_rag(
             verified_lines.append(sent)
             continue
 
-        # used_citations 누적
         for cid in cids:
             if cid not in used_citations:
                 used_citations.append(cid)
 
-        # 문장 뒤에 [C#] 부착
         verified_lines.append(sent + " " + " ".join([f"[{cid}]" for cid in cids]))
 
-    # 전체 context 만들기 (max_context_chars 제한)
     context_blocks: List[str] = []
     total = 0
     for c in citations:
@@ -433,7 +555,6 @@ def verify_summary_with_rag(
     context = "\n\n".join(context_blocks)
     verified_summary = "\n".join(verified_lines).strip()
 
-
     return {
         "query": global_query,
         "verified_summary": verified_summary,
@@ -441,4 +562,9 @@ def verify_summary_with_rag(
         "citations": citations,
         "used_citations": used_citations,
         "unsupported_sentences": unsupported_sentences,
+        # (NEW) 관찰/디버그용 (호출자 깨지지 않음)
+        "llm_summary": llm_summary_candidate,
+        "rag_summary": rag_summary_candidate,
+        "chosen_summary_source": chosen_source,
+        "judge_ab": judge_ab,
     }
