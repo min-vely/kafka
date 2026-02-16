@@ -138,14 +138,3 @@ python3 tests/test_popup.py
 - **스케줄러**: APScheduler
 - **알림**: pync (macOS), win10toast (Windows)
 
-## 📄 라이선스
-
-MIT License
-
-## 🤝 기여
-
-이슈 및 PR 환영합니다!
-
----
-
-**Made with ❤️ using LangGraph**

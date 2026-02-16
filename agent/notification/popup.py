@@ -93,27 +93,50 @@ def send_popup_notification(
             print(f"   클릭 시 열림: {url}")
         
         # Windows: winotify 사용 (클릭 시 URL 열기 - 안정적)
-        elif OS_TYPE == 'Windows' and WINOTIFY_AVAILABLE and url:
-            toast = Notification(
-                app_id="카프카 AI",
-                title=title,
-                msg=message,
-                duration="short" if timeout <= 5 else "long",
-                icon=app_icon
-            )
-            
-            # 클릭 시 URL 열기 액션 추가
-            toast.set_audio(audio.Default, loop=False)
-            toast.add_actions(
-                label="퀴즈 풀기",
-                launch=url
-            )
-            
-            toast.show()
-            
-            print(f"✅ [Windows - 클릭 가능] 알림 발송 성공!")
-            print(f"   제목: {title}")
-            print(f"   클릭 시 열림: {url}")
+        elif OS_TYPE == 'Windows' and WINOTIFY_AVAILABLE:
+            try:
+                toast = Notification(
+                    app_id="카프카 AI",
+                    title=title,
+                    msg=message,
+                    duration="short" if timeout <= 5 else "long",
+                    icon=app_icon
+                )
+                
+                # 사운드 설정
+                toast.set_audio(audio.Default, loop=False)
+                
+                # URL이 있을 때만 액션 버튼 추가
+                if url:
+                    toast.add_actions(
+                        label="퀴즈 풀기",
+                        launch=url
+                    )
+                
+                toast.show()
+                
+                if url:
+                    print(f"✅ [Windows - 클릭 가능] 알림 발송 성공!")
+                    print(f"   제목: {title}")
+                    print(f"   클릭 시 열림: {url}")
+                else:
+                    print(f"✅ [Windows] 알림 발송 성공!")
+                    print(f"   제목: {title}")
+                    print(f"   내용: {message[:80]}...")
+            except Exception as e:
+                print(f"⚠️  [Windows] winotify 오류: {e}")
+                print(f"   plyer로 폴백 시도 중...")
+                # winotify 실패 시 plyer로 폴백
+                if PLYER_AVAILABLE:
+                    notification.notify(
+                        title=title,
+                        message=message,
+                        app_name='카프카',
+                        timeout=timeout
+                    )
+                    print(f"✅ [Windows - plyer] 알림 발송 성공!")
+                else:
+                    raise
         
         # 기타 플랫폼 또는 라이브러리 없을 때: plyer 사용
         elif PLYER_AVAILABLE:
