@@ -4,7 +4,7 @@
 
 기획서 기반 요구사항:
 - 에빙하우스 망각 곡선 주기 (D+1, 4, 7, 11)
-- 일일 최대 4회 알림
+- 에빙하우스 겹침 시 하루 최대 4회, 퀴즈 오답 시 +1 (최대 5회)
 - 오전 8시 출근길 발송 권장
 - 페르소나 말투 적용
 - 오답 시 다음날 예비 문제 재발송
@@ -93,27 +93,50 @@ def send_popup_notification(
             print(f"   클릭 시 열림: {url}")
         
         # Windows: winotify 사용 (클릭 시 URL 열기 - 안정적)
-        elif OS_TYPE == 'Windows' and WINOTIFY_AVAILABLE and url:
-            toast = Notification(
-                app_id="카프카 AI",
-                title=title,
-                msg=message,
-                duration="short" if timeout <= 5 else "long",
-                icon=app_icon
-            )
-            
-            # 클릭 시 URL 열기 액션 추가
-            toast.set_audio(audio.Default, loop=False)
-            toast.add_actions(
-                label="퀴즈 풀기",
-                launch=url
-            )
-            
-            toast.show()
-            
-            print(f"✅ [Windows - 클릭 가능] 알림 발송 성공!")
-            print(f"   제목: {title}")
-            print(f"   클릭 시 열림: {url}")
+        elif OS_TYPE == 'Windows' and WINOTIFY_AVAILABLE:
+            try:
+                toast = Notification(
+                    app_id="카프카 AI",
+                    title=title,
+                    msg=message,
+                    duration="short" if timeout <= 5 else "long",
+                    icon=app_icon
+                )
+                
+                # 사운드 설정
+                toast.set_audio(audio.Default, loop=False)
+                
+                # URL이 있을 때만 액션 버튼 추가
+                if url:
+                    toast.add_actions(
+                        label="퀴즈 풀기",
+                        launch=url
+                    )
+                
+                toast.show()
+                
+                if url:
+                    print(f"✅ [Windows - 클릭 가능] 알림 발송 성공!")
+                    print(f"   제목: {title}")
+                    print(f"   클릭 시 열림: {url}")
+                else:
+                    print(f"✅ [Windows] 알림 발송 성공!")
+                    print(f"   제목: {title}")
+                    print(f"   내용: {message[:80]}...")
+            except Exception as e:
+                print(f"⚠️  [Windows] winotify 오류: {e}")
+                print(f"   plyer로 폴백 시도 중...")
+                # winotify 실패 시 plyer로 폴백
+                if PLYER_AVAILABLE:
+                    notification.notify(
+                        title=title,
+                        message=message,
+                        app_name='카프카',
+                        timeout=timeout
+                    )
+                    print(f"✅ [Windows - plyer] 알림 발송 성공!")
+                else:
+                    raise
         
         # 기타 플랫폼 또는 라이브러리 없을 때: plyer 사용
         elif PLYER_AVAILABLE:
@@ -171,7 +194,7 @@ def schedule_popup_notifications(
     기획서 기반 설계:
         - 발송 시간: 오전 8시 (출근길, 인지 부하가 적은 시간)
         - 발송 주기: D+1, D+4, D+7, D+11 (에빙하우스 망각 곡선)
-        - 일일 최대 4회 (알림 스트레스 방지)
+        - 에빙하우스 겹침 시 하루 최대 4회, 퀴즈 오답 재발송 시 +1 (최대 5회)
     """
     print(f"\n{'='*60}")
     print(f"📅 에빙하우스 알림 스케줄 생성 완료")

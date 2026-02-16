@@ -39,6 +39,7 @@ class AgentState(TypedDict, total=False):
     persona_count: int  # 페르소나 순환 카운터 (0-9, 10개 페르소나 순차 적용)
     styled_content: str  # 페르소나가 적용된 최종 메시지
     schedule_dates: List[str]  # 에빙하우스 주기 날짜 (D+1, D+4, D+7, D+11)
+    schedule_id: int  # DB에 저장된 스케줄 ID (큐 처리 시 활용)
 
     # 🆕 지식형 보강 정보
     augmentation_info: str  # 웹 서치 결과 또는 추천 정보

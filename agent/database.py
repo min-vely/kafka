@@ -111,6 +111,20 @@ class ScheduleDB:
             )
         ''')
         
+        # URL 대기열 테이블 (무제한 저장, 매일 1개씩 처리)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS url_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT DEFAULT 'default_user',
+                url TEXT NOT NULL,
+                input_type TEXT DEFAULT 'url',
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                processed_at TIMESTAMP,
+                schedule_id INTEGER
+            )
+        ''')
+        
         self.conn.commit()
         print(f"✅ 데이터베이스 초기화 완료: {self.db_path}")
     
@@ -191,31 +205,29 @@ class ScheduleDB:
         
         return schedules
     
-    def get_schedules_for_date(self, date: str) -> List[Dict]:
+    def get_schedules_for_date(self, date: str, limit: int = 4) -> List[Dict]:
         """
-        특정 날짜에 발송할 스케줄 조회
+        특정 날짜에 발송할 스케줄 조회 (에빙하우스 겹침 시 하루 최대 limit개)
         
         Args:
-            date: 날짜 문자열 (YYYY-MM-DD 형식, 예: "2026-02-13")
+            date: 날짜 문자열 (YYYY-MM-DD 형식)
+            limit: 최대 조회 개수 (기본 4개, 에빙하우스 정규 알림 한도)
         
         Returns:
-            해당 날짜가 schedule_dates에 포함된 pending 스케줄 리스트
-        
-        사용 예:
-            schedules = db.get_schedules_for_date("2026-02-13")
-            # 2026-02-13에 발송해야 하는 스케줄들 반환
+            해당 날짜에 발송할 pending 스케줄 리스트 (최대 limit개)
         
         이유:
-            - 스케줄러가 매일 오전 8시에 실행될 때 오늘 발송할 스케줄만 조회
-            - schedule_dates는 JSON 배열로 저장되므로 LIKE 검색 사용
+            - 에빙하우스 날짜가 겹쳐도 하루 최대 4개만 발송 (정보 과부하 방지)
+            - 재발송은 별도로 1개 추가 허용 (총 5개)
         """
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM schedules 
             WHERE status = 'pending'
             AND schedule_dates LIKE ?
-            ORDER BY created_at DESC
-        ''', (f'%"{date}"%',))
+            ORDER BY created_at ASC
+            LIMIT ?
+        ''', (f'%"{date}"%', limit))
         
         rows = cursor.fetchall()
         
@@ -422,14 +434,15 @@ class ScheduleDB:
         
         return cursor.fetchone()[0]
     
-    def get_retry_schedules_for_date(self, date: str) -> List[Dict]:
-        """특정 날짜에 재발송할 스케줄 조회"""
+    def get_retry_schedules_for_date(self, date: str, limit: int = 1) -> List[Dict]:
+        """특정 날짜에 재발송할 스케줄 조회 (하루 최대 1개, 퀴즈 오답 예외)"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM retry_schedules
             WHERE retry_date = ? AND status = 'pending'
             ORDER BY created_at ASC
-        ''', (date,))
+            LIMIT ?
+        ''', (date, limit))
         
         return [dict(row) for row in cursor.fetchall()]
     
@@ -443,6 +456,79 @@ class ScheduleDB:
         ''', (retry_id,))
         self.conn.commit()
         
+    def add_to_url_queue(self, url: str, user_id: str = "default_user", input_type: str = "url") -> int:
+        """
+        URL 대기열에 추가 (무제한 저장)
+        
+        Args:
+            url: 저장할 URL
+            user_id: 사용자 ID
+            input_type: 'url' | 'text'
+        
+        Returns:
+            큐 항목 ID
+        """
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO url_queue (user_id, url, input_type, status)
+            VALUES (?, ?, ?, 'pending')
+        ''', (user_id, url, input_type))
+        self.conn.commit()
+        return cursor.lastrowid
+    
+    def get_next_from_url_queue(self) -> Optional[Dict]:
+        """
+        대기열에서 가장 오래된 URL 1개 꺼내기 (FIFO)
+        
+        Returns:
+            큐 항목 또는 None
+        """
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM url_queue
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
+            LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+    
+    def mark_queue_item_processing(self, queue_id: int):
+        """큐 항목을 처리 중으로 표시"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            UPDATE url_queue SET status = 'processing'
+            WHERE id = ?
+        ''', (queue_id,))
+        self.conn.commit()
+    
+    def mark_queue_item_completed(self, queue_id: int, schedule_id: int):
+        """큐 항목 처리 완료"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            UPDATE url_queue 
+            SET status = 'completed', processed_at = ?, schedule_id = ?
+            WHERE id = ?
+        ''', (datetime.now(), schedule_id, queue_id))
+        self.conn.commit()
+    
+    def mark_queue_item_failed(self, queue_id: int):
+        """큐 항목 처리 실패"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            UPDATE url_queue SET status = 'failed'
+            WHERE id = ?
+        ''', (queue_id,))
+        self.conn.commit()
+    
+    def get_pending_queue_count(self) -> int:
+        """대기 중인 큐 항목 수"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM url_queue WHERE status = 'pending'")
+        return cursor.fetchone()[0]
+    
     def get_similar_recommendations(self, category: str, limit: int = 3) -> List[Dict]:
         """
         동일한 카테고리의 다른 추천 콘텐츠 조회

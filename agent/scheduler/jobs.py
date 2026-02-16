@@ -10,18 +10,65 @@ from typing import List, Dict
 import json
 
 
+def process_one_from_queue(db):
+    """
+    URL 대기열에서 1개 꺼내서 전체 파이프라인 처리 (매일 1개씩)
+    
+    동작:
+    - 큐에서 가장 오래된 URL 1개 조회
+    - graph.invoke()로 전체 워크플로우 실행
+    - schedules 테이블에 저장됨 (에빙하우스 날짜 적용)
+    """
+    item = db.get_next_from_url_queue()
+    if not item:
+        return
+    
+    queue_id = item['id']
+    url = item['url']
+    
+    print(f"📥 대기열에서 URL 처리 중 (큐 ID: {queue_id})")
+    print(f"   URL: {url[:60]}..." if len(url) > 60 else f"   URL: {url}")
+    
+    db.mark_queue_item_processing(queue_id)
+    
+    try:
+        from agent.graph import build_graph
+        
+        graph = build_graph()
+        initial_state = {
+            "user_input": url,
+            "input_text": "",
+            "max_improve": 2
+        }
+        
+        result = graph.invoke(initial_state)
+        schedule_id = result.get("schedule_id") or 0
+        
+        db.mark_queue_item_completed(queue_id, schedule_id)
+        print(f"✅ 큐 항목 처리 완료 (Schedule ID: {schedule_id})")
+        
+    except Exception as e:
+        db.mark_queue_item_failed(queue_id)
+        print(f"❌ 큐 항목 처리 실패: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def send_daily_notifications():
     """
     매일 오전 8시에 실행되는 메인 작업 
     
     동작:
-    1. DB에서 오늘 발송할 스케줄 조회
-    2. 각 스케줄에 대해 알림 발송
-    3. 발송 결과를 DB에 기록
+    1. URL 대기열에서 1개 꺼내 처리 (매일 1개씩)
+    2. DB에서 오늘 발송할 스케줄 조회 (에빙하우스 겹침 시 하루 최대 4개)
+    3. 오늘 재발송할 스케줄 조회 (퀴즈 오답 시 하루 최대 1개, 총 5개까지)
+    4. 각 스케줄에 대해 알림 발송
     
     이유:
+    - URL 무제한 저장, 매일 1개씩 처리 (1일 1스크랩처럼)
     - 에빙하우스 망각 곡선에 따라 정해진 날짜에 복습 알림 발송
-    - 오전 8시 출근길 시간대는 인지 부하가 적어 학습에 효과적
+    - 에빙하우스 날짜 겹침 시 하루 최대 4개 (정보 과부하 방지)
+    - 퀴즈 오답 재발송 시 하루 최대 5개 (4+1)
     """
     from agent.database import get_db
     
@@ -33,19 +80,26 @@ def send_daily_notifications():
     db = get_db()
     
     try:
-        # 오늘 발송할 스케줄 조회
-        schedules = db.get_schedules_for_date(today)
+        # 1. URL 대기열에서 1개 꺼내 처리 (매일 1개씩)
+        process_one_from_queue(db)
         
-        # 오늘 재발송할 스케줄 조회
-        retry_schedules = db.get_retry_schedules_for_date(today)
+        # 2. 오늘 발송할 스케줄 조회 (에빙하우스 겹침 시 하루 최대 4개)
+        schedules = db.get_schedules_for_date(today, limit=4)
+        
+        # 3. 오늘 재발송할 스케줄 조회 (퀴즈 오답 시 하루 최대 1개)
+        retry_schedules = db.get_retry_schedules_for_date(today, limit=1)
         
         total_count = len(schedules) + len(retry_schedules)
         
         if total_count == 0:
-            print(f"📭 오늘 발송할 알림이 없습니다.")
+            pending_count = db.get_pending_queue_count()
+            if pending_count > 0:
+                print(f"📭 오늘 발송할 알림은 없습니다. (대기 중인 URL: {pending_count}개)")
+            else:
+                print(f"📭 오늘 발송할 알림이 없습니다.")
             return
         
-        print(f"📬 발송 대상: {len(schedules)}개 스케줄, {len(retry_schedules)}개 재발송\n")
+        print(f"📬 발송 대상: 정규 {len(schedules)}개 + 재발송 {len(retry_schedules)}개 (하루 최대 5개)\n")
         
         success_count = 0
         fail_count = 0

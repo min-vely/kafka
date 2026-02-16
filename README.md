@@ -58,11 +58,14 @@ UPSTAGE_API_KEY=your_api_key_here
 
 ### 3. 콘텐츠 처리
 ```bash
-# 텍스트 직접 입력
+# 텍스트 직접 입력 (즉시 처리)
 python3 main.py --text "AI는 인공지능입니다. 머신러닝은 AI의 하위 분야입니다."
 
-# URL로 처리
+# URL 저장 (대기열에 무제한 누적, 매일 1개씩 스케줄러가 처리)
 python3 main.py --url "https://example.com/article"
+
+# URL 즉시 처리 (큐 거치지 않고 바로 처리)
+python3 main.py --url "https://example.com/article" --process-now
 ```
 
 ### 4. 웹 서버 실행 (터미널 1)
@@ -107,7 +110,7 @@ python3 -m agent.scheduler.scheduler_service --interval 10
 - 알림 클릭 시 자동으로 웹 퀴즈 페이지 열림
 
 ### 5. 웹 기반 퀴즈 시스템
-- 1일 1문제 출제
+- URL 무제한 저장, 매일 1개씩 처리
 - 자동 채점 및 오답 재발송 (최대 3회)
 
 ## 🧪 테스트
@@ -138,14 +141,3 @@ python3 tests/test_popup.py
 - **스케줄러**: APScheduler
 - **알림**: pync (macOS), win10toast (Windows)
 
-## 📄 라이선스
-
-MIT License
-
-## 🤝 기여
-
-이슈 및 PR 환영합니다!
-
----
-
-**Made with ❤️ using LangGraph**

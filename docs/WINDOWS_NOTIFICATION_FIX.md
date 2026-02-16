@@ -85,17 +85,36 @@ toast.show()  # ✅ 안정적으로 작동
 ## 🧪 테스트 방법
 
 ### Windows에서 테스트
+
+#### 1단계: 라이브러리 설치
 ```bash
-# 1. 라이브러리 설치
+# winotify 설치
 pip install winotify
 
-# 2. 웹 서버 실행 (터미널 1)
+# 전체 의존성 재설치
+pip install -r requirements.txt
+```
+
+#### 2단계: winotify 단독 테스트
+```bash
+# winotify가 제대로 작동하는지 먼저 확인
+python tests/test_winotify.py
+```
+
+**기대 결과:**
+- 테스트 알림 2개가 순차적으로 표시됨
+- "퀴즈 풀기" 버튼이 있는 알림도 표시됨
+- 버튼 클릭 시 브라우저 열림 ✅
+
+#### 3단계: 전체 시스템 테스트
+```bash
+# 웹 서버 실행 (터미널 1)
 python -m web.web_server --port 8080
 
-# 3. 콘텐츠 처리 (터미널 2)
+# 콘텐츠 처리 (터미널 2)
 python main.py --text "AI는 인공지능입니다"
 
-# 4. 알림 확인
+# 알림 확인
 # - 우측 하단 알림 센터에 팝업 표시
 # - "퀴즈 풀기" 버튼 클릭
 # - 브라우저에서 퀴즈 페이지 자동 열림 ✅
@@ -117,22 +136,52 @@ python main.py --text "AI는 인공지능입니다"
 
 ## 🔧 문제 해결
 
-### winotify 설치 오류 시
+### 문제 1: winotify 설치 오류
 ```bash
-# 관리자 권한으로 실행
+# 해결책 1: 사용자 권한으로 설치
 pip install --user winotify
+
+# 해결책 2: 관리자 권한으로 실행
+# PowerShell을 관리자로 실행 후
+pip install winotify
 ```
 
-### 알림이 표시되지 않을 때
-1. **Windows 알림 설정 확인**
-   - 설정 → 시스템 → 알림
-   - Python 또는 터미널 앱 알림 허용
+### 문제 2: 알림이 표시되지 않을 때
 
-2. **집중 모드 확인**
-   - 집중 모드 비활성화
+#### 체크리스트
+1. **winotify 설치 확인**
+   ```bash
+   python -c "import winotify; print('설치됨')"
+   ```
+   - 오류 나면: `pip install winotify`
 
-3. **재부팅**
+2. **Windows 알림 설정 확인**
+   - **설정** → **시스템** → **알림**
+   - **Python** 또는 **PowerShell** 앱 찾기
+   - **알림 허용** 체크
+
+3. **집중 모드 확인**
+   - 우측 하단 **알림 센터** 클릭
+   - **집중 모드** 비활성화
+
+4. **테스트 스크립트 실행**
+   ```bash
+   python tests/test_winotify.py
+   ```
+   - 테스트 알림이 뜨는지 확인
+
+5. **재부팅**
    - Windows 알림 시스템 재시작
+
+### 문제 3: URL 없는 알림도 안 뜰 때
+
+**원인**: 조건문에 `and url`이 있었음 (현재는 수정됨)
+
+**확인**:
+```python
+# agent/notification/popup.py 95번 줄
+elif OS_TYPE == 'Windows' and WINOTIFY_AVAILABLE:  # ✅ url 조건 제거됨
+```
 
 ---
 

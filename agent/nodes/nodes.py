@@ -533,7 +533,7 @@ def schedule_node(state):
       적절한 시점(1일, 4일, 7일, 11일)에 복습하면
       정보가 장기 기억으로 전환됩니다.
     - 발송 시간: 오전 8시 출근길 (인지 부하가 적은 시간)
-    - 일일 최대 4회 (알림 스트레스 방지 - 듀오링고 문제점 개선)
+    - 에빙하우스 겹침 시 하루 최대 4회, 퀴즈 오답 시 +1 (최대 5회)
     - DB 저장: 프로그램 재시작 후에도 스케줄 유지
     """
     schedule_dates = calculate_ebbinghaus_dates()
@@ -576,6 +576,7 @@ def schedule_node(state):
             category=state.get("category", "지식형"),
             questions=questions  # ✅ 퀴즈 문제 DB에 저장
         )
+        state["schedule_id"] = schedule_id  # 큐 처리 시 활용
         print(f"💾 데이터베이스 저장 완료 (Schedule ID: {schedule_id})")
         print(f"   - URL: {url[:50] if url else '(텍스트 입력)'}...")
         print(f"   - 요약: {summary_text[:50] if summary_text else '(없음)'}...")
