@@ -193,10 +193,22 @@ def main():
         "max_improve": 2
     }
     
-    # URL이 있으면 추가(input_url로 기능 이동)
-    # if target_url:
-    #     initial_state["url"] = target_url
+    # # URL이 있으면 추가(input_url로 기능 이동)
+    # # if target_url:
+    # #     initial_state["url"] = target_url
+    # result = graph.invoke(initial_state)
+    # pretty_print(result)
+
+    # 그래프 실행 및 결과 획득
     result = graph.invoke(initial_state)
+
+    # 🆕 에이전틱 레이어: 최종 메시지 내 일정이 있다면 구글 캘린더 등록 링크 생성
+    from agent.agent_tools import run_calendar_agent
+    if result.get("styled_content"):
+        # 기존 페르소나 적용 메시지를 에이전트가 검토하여 업데이트
+        result["styled_content"] = run_calendar_agent(result["styled_content"])
+
+    # 최종 결과 출력
     pretty_print(result)
 
 
