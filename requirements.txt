@@ -15,3 +15,9 @@ pync  # macOS 클릭 가능한 알림
 winotify  # Windows 클릭 가능한 알림 (안정적)
 tavily-python
 pyobjc
+
+# --- 에이전트 및 검색 고도화용 추가 ---
+langchainhub        # Pull prompt 등 허브 기능 사용 시 필수
+rank_bm25           # RAG 성능 향상을 위한 하이브리드 검색용
+tiktoken            # 토큰 수 계산 및 텍스트 분할 최적화용
+openai              # Upstage와 호환되는 기본 인터페이스 지원
