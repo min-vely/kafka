@@ -100,6 +100,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--text", type=str, help="Input text")
     parser.add_argument("--url", type=str, help="YouTube URL or News Article URL")
+    parser.add_argument(
+        "--process-now",
+        action="store_true",
+        help="URL을 큐에 넣지 않고 즉시 처리 (기본: URL은 큐에 저장, --process-now면 즉시 처리)"
+    )
     args = parser.parse_args()
 
     # input_url노드로 값 받기 위한 변수 추가(input_text, source_input)
@@ -115,6 +120,18 @@ def main():
     elif target_url:
         source_input = target_url
         input_text = ""  # URL은 노드에서 추출해야 하니까 비워둠
+        
+        # URL 무제한 저장 모드: --process-now 없으면 큐에 저장만 하고 종료
+        if not args.process_now:
+            from agent.database import get_db
+            db = get_db()
+            qid = db.add_to_url_queue(target_url, user_id="default_user", input_type="url")
+            pending = db.get_pending_queue_count()
+            print(f"✅ URL이 대기열에 저장되었습니다 (큐 ID: {qid})")
+            print(f"   📬 대기 중인 URL: {pending}개")
+            print(f"   💡 스케줄러가 매일 1개씩 처리합니다 (python -m agent.scheduler.scheduler_service)")
+            print(f"   💡 즉시 처리하려면: python main.py --url \"{target_url}\" --process-now")
+            return
 
     # 인자가 아무것도 없을 경우 대화형 입력 모드 진입
     else:
