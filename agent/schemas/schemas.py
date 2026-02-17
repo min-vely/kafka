@@ -26,6 +26,7 @@ class AgentState(TypedDict, total=False):
     # outputs
     summary: str   # JSON string: {"Summary":"...","UsedCitations":[...],"Citations":[...]}
     quiz: str      # JSON string: {"questions":[...]}
+    questions: List[Dict[str, Any]] # 퀴즈 리스트 필드 추가
     thought_questions: List[str]
 
     # evaluation / control
