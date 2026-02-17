@@ -5,12 +5,7 @@ import re
 from typing import Any, Dict
 from dotenv import load_dotenv
 from langchain_upstage import ChatUpstage
-from langchain_core.tools import tool
-
-try:
-    from tavily import TavilyClient
-except ImportError:
-    TavilyClient = None
+from agent.tools.get_latest_update_analysis import get_latest_update_analysis
 
 from agent.prompts import (
     SAFETY_PROMPT, #extract_content 노드에서 콘텐츠 안전도 검사하는 프롬프트 추가
@@ -39,54 +34,6 @@ from agent.rag import verify_summary_with_rag
 from agent.database import get_db
 
 load_dotenv()
-
-# -----------------------------
-# Tools
-# -----------------------------
-@tool
-def get_latest_update_analysis(summary_text: str) -> str:
-    """
-    주어진 요약(summary_text)에 대해 최신 정보를 웹에서 검색하고, 
-    과거 정보와 현재 상황을 비교 분석한 한 줄 소식을 반환합니다.
-    최신 트렌드, 뉴스, 인물 현황 등의 업데이트가 필요할 때 사용합니다.
-    """
-    try:
-        tavily_key = os.environ.get("TAVILY_API_KEY")
-        if not (tavily_key and TavilyClient):
-            return "Tavily API Key가 없거나 라이브러리가 설치되지 않았습니다."
-            
-        client = TavilyClient(api_key=tavily_key)
-        
-        # 1. 최신 정보를 찾기 위한 전용 검색어 생성
-        print("   - 전용 검색어 생성 중...")
-        query_gen_prompt = TAVILY_QUERY_GENERATOR_PROMPT.format(summary_text=summary_text)
-        search_query_resp = llm.invoke(query_gen_prompt)
-        search_query = (search_query_resp.content or "").strip()
-        print(f"   - 검색어: {search_query}")
-        
-        # 2. Tavily 검색
-        print("   - Tavily 웹 검색 중...")
-        response = client.search(query=search_query, search_depth="advanced", max_results=3)
-        results = response.get("results", [])
-        
-        if not results:
-            return "최신 정보를 검색해 보았으나, 현재로서는 업데이트된 내용이 발견되지 않았습니다."
-            
-        search_results_text = ""
-        for res in results:
-            search_results_text += f"- 제목: {res['title']}\n  내용: {res['content']}\n  URL: {res['url']}\n\n"
-        
-        # 3. 분석
-        print("   - 검색 결과와 원문 비교 분석 중...")
-        analysis_prompt = UPDATE_ANALYSIS_PROMPT.format(
-            summary_text=summary_text,
-            search_results=search_results_text
-        )
-        analysis_resp = llm.invoke(analysis_prompt)
-        return (analysis_resp.content or "").strip()
-        
-    except Exception as e:
-        return f"(웹 서치 및 분석 중 오류 발생: {str(e)})"
 
 
 # -----------------------------
