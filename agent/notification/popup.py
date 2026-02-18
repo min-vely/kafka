@@ -15,7 +15,6 @@ import platform
 from typing import List, Optional
 from datetime import datetime
 import subprocess
-from winotify import Notification, audio
 
 # 플랫폼 감지
 OS_TYPE = platform.system()
@@ -23,9 +22,10 @@ WINOTIFY_AVAILABLE = False
 PYNC_AVAILABLE = False
 PLYER_AVAILABLE = False
 
-# Windows용 클릭 가능한 알림 (안정적)
+# Windows용 클릭 가능한 알림 (안정적) - winotify는 Windows에서만 import
 if OS_TYPE == 'Windows':
     try:
+        from winotify import Notification, audio  # type: ignore[import-untyped]
         WINOTIFY_AVAILABLE = True
         print("🔍 [popup.py] Windows winotify 로드 성공")
     except ImportError:

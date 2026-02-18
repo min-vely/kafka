@@ -31,6 +31,7 @@ from agent.utils import (
     get_youtube_transcript,
     get_article_content,
     calculate_ebbinghaus_dates,
+    validate_schedule_dates,
     extract_json
 )
 from agent.rag import verify_summary_with_rag
@@ -168,25 +169,32 @@ def extract_content_node(state):
     except Exception as e:
         return {"is_valid": False, "is_safe": False, "messages": f"Safety Check 에러: {str(e)}"}
 
+def classify_content(text: str) -> str:
+    """
+    텍스트를 지식형/힐링형으로 분류합니다.
+    classify_node 및 정확도 평가(evaluate_classify_accuracy)에서 공통 사용.
+    """
+    try:
+        resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + (text or "")[:2000])
+        raw_output = (resp.content or "").strip()
+    except Exception:
+        return "지식형"
+    if "지식형" in raw_output:
+        return "지식형"
+    if "힐링형" in raw_output:
+        return "힐링형"
+    return "지식형"
+
+
 def classify_node(state):
     """3) 콘텐츠 성격을 분석하여 '지식형' 또는 '힐링형'으로 분류 (CoT 적용)"""
     print("\n[Node] classify_node: 콘텐츠 분류 중...")
     article = state.get("input_text", "")
-
     try:
-        resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + article[:2000])
-        raw_output = (resp.content or "").strip()
+        category = classify_content(article)
     except Exception as e:
         print(f"⚠️ 분류 중 오류: {e}. 기본값(지식형) 사용.")
-        raw_output = ""
-
-    if "지식형" in raw_output:
         category = "지식형"
-    elif "힐링형" in raw_output:
-        category = "힐링형"
-    else:
-        category = "지식형"
-
     state["category"] = category
     return state
 
@@ -333,6 +341,18 @@ def improve_node(state):
     state["draft_summary"] = improved_draft
     state["improve_count"] = count + 1
 
+    return state
+
+
+def save_summary_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    기획서 6번: 확정된 3줄 요약본 저장 (quiz/thought 생성 전)
+    judge 통과 후, augment/quiz 노드로 가기 전에 요약을 saved_summary로 확정.
+    LLM 사용 없음, 상태만 업데이트.
+    """
+    summary = state.get("summary", "")
+    state["saved_summary"] = summary
+    print("[Node] save_summary: 확정된 요약 저장 완료")
     return state
 
 
@@ -627,6 +647,55 @@ def persona_node(state):
 
 
 # ============================================================
+# 페르소나 후 안전 검사 노드 (기획서: persona Llama Guard)
+# ============================================================
+
+def persona_safety_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    페르소나 적용된 styled_content에 대한 유해성 검사.
+    UNSAFE 시 페르소나 스타일을 제거한 원본 콘텐츠로 대체하여 schedule로 진행.
+    """
+    styled_content = state.get("styled_content", "")
+    if not styled_content:
+        return state
+
+    check_text = styled_content[:2000]
+    try:
+        safety_llm = llm.invoke(SAFETY_PROMPT + "\n\n[CONTENT]\n" + check_text)
+        safety_response = (safety_llm.content or "").strip().upper()
+
+        if "UNSAFE" in safety_response:
+            print("⚠️ [persona_safety_check] 페르소나 적용 콘텐츠가 유해로 판정됨. 원본으로 대체합니다.")
+            # 페르소나 미적용 원본 콘텐츠로 대체
+            try:
+                s_obj = json.loads(state.get("summary", ""))
+                summary_text = s_obj.get("Summary", "")
+            except Exception:
+                summary_text = str(state.get("summary", ""))
+
+            category = state.get("category", "지식형")
+            if category == "지식형":
+                quiz_text = state.get("quiz", "")
+                aug_info = state.get("augmentation_info", "")
+                fallback = f"[요약]\n{summary_text}\n\n[퀴즈]\n{quiz_text}"
+                if aug_info:
+                    fallback += f"\n\n{aug_info}"
+            else:
+                thought_text = "\n".join(state.get("thought_questions", []))
+                fallback = f"[요약]\n{summary_text}\n\n[생각 유도 질문]\n{thought_text}"
+
+            state["styled_content"] = fallback
+            state["persona_style"] = "(안전 검사 통과용 기본형)"
+        else:
+            print("✅ [persona_safety_check] 페르소나 콘텐츠 안전 검사 통과")
+
+    except Exception as e:
+        print(f"⚠️ [persona_safety_check] 검사 중 오류: {e}. 원본 유지.")
+
+    return state
+
+
+# ============================================================
 # 에빙하우스 스케줄링 노드
 # ============================================================
 
@@ -650,8 +719,17 @@ def schedule_node(state):
     - DB 저장: 프로그램 재시작 후에도 스케줄 유지
     """
     schedule_dates = calculate_ebbinghaus_dates()
+    is_valid, validated_dates, err_msg = validate_schedule_dates(schedule_dates)
+    if not is_valid:
+        print(f"⚠️ [schedule] 날짜 검증 실패: {err_msg}. 재계산 후 진행합니다.")
+        schedule_dates = calculate_ebbinghaus_dates()
+        is_valid, validated_dates, _ = validate_schedule_dates(schedule_dates)
+        if not is_valid:
+            print(f"❌ [schedule] 날짜 검증 재실패. 스케줄 저장을 건너뜁니다.")
+            return state
+    schedule_dates = validated_dates
     state["schedule_dates"] = schedule_dates
-    
+
     print(f"\n📅 에빙하우스 알림 예약 완료:")
     for i, date in enumerate(schedule_dates, 1):
         print(f"  {i}차 알림: {date} 오전 8시")

@@ -125,12 +125,25 @@ python3 tests/test_database.py
 python3 tests/test_popup.py
 ```
 
+### classify 정확도 평가
+```bash
+python3 scripts/evaluate_classify_accuracy.py
+# --fixture tests/fixtures/classify_samples.json (기본값)
+```
+
 ## 📚 문서
 
 - [데이터베이스 가이드](docs/DATABASE_GUIDE.md)
 - [클릭 가능한 알림 가이드](docs/NOTIFICATION_CLICK_GUIDE.md)
 - [퀴즈 시스템 가이드](docs/QUIZ_GUIDE.md)
 - [스케줄러 가이드](docs/SCHEDULER_GUIDE.md)
+- [워크플로우 시각화](docs/WORKFLOW_VISUALIZATION.md)
+
+### 워크플로우 시각화
+```bash
+python3 scripts/visualize_workflow.py
+# docs/workflow.mmd 생성 → https://mermaid.live 에 붙여넣어 확인
+```
 
 ## 🛠️ 기술 스택
 

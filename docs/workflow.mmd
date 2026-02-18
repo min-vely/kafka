@@ -1,0 +1,43 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	input_url(input_url)
+	extract_content(extract_content)
+	classify(classify)
+	synthesize(synthesize)
+	verify(verify)
+	judge(judge)
+	improve(improve)
+	augment(augment)
+	quiz(quiz)
+	quiz_judge(quiz_judge)
+	quiz_improve(quiz_improve)
+	persona(persona)
+	schedule(schedule)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> input_url;
+	augment --> quiz;
+	classify --> synthesize;
+	extract_content -. &nbsp;INVALID&nbsp; .-> __end__;
+	extract_content -. &nbsp;SAFE&nbsp; .-> classify;
+	improve --> verify;
+	input_url -. &nbsp;invalid&nbsp; .-> __end__;
+	input_url -. &nbsp;valid&nbsp; .-> extract_content;
+	judge -.-> augment;
+	judge -.-> improve;
+	judge -.-> quiz;
+	persona --> schedule;
+	quiz --> quiz_judge;
+	quiz_improve --> quiz_judge;
+	quiz_judge -.-> persona;
+	quiz_judge -. &nbsp;improve&nbsp; .-> quiz_improve;
+	synthesize --> verify;
+	verify --> judge;
+	schedule --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

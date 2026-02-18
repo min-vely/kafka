@@ -1,19 +1,21 @@
 from langgraph.graph import StateGraph, END
 from agent.schemas import AgentState
 from agent.nodes import (
-    input_url_node, #URL 검증 노드
-    extract_content_node, #URL text 추출 및 콘텐츠 검증
+    input_url_node,
+    extract_content_node,
     classify_node,
     synthesize_node,
     verify_node,
     judge_node,
     improve_node,
-    knowledge_augmentation_node, # 🆕 추가
+    save_summary_node,
+    knowledge_augmentation_node,
     quiz_node,
-    quiz_judge_node, # 🆕 추가
-    quiz_improve_node, # 🆕 추가
-    persona_node,  # 페르소나 적용
-    schedule_node,  # 에빙하우스 스케줄링
+    quiz_judge_node,
+    quiz_improve_node,
+    persona_node,
+    persona_safety_check_node,  # 페르소나 후 안전 검사
+    schedule_node,
 )
 
 
@@ -27,12 +29,14 @@ def build_graph():
     g.add_node("verify", verify_node)
     g.add_node("judge", judge_node)
     g.add_node("improve", improve_node)
+    g.add_node("save_summary", save_summary_node)
     g.add_node("augment", knowledge_augmentation_node) # 🆕 추가
     g.add_node("quiz", quiz_node)
     g.add_node("quiz_judge", quiz_judge_node) # 🆕 추가
     g.add_node("quiz_improve", quiz_improve_node) # 🆕 추가
-    g.add_node("persona", persona_node)  # 페르소나 적용 노드
-    g.add_node("schedule", schedule_node)  # 스케줄링 노드
+    g.add_node("persona", persona_node)
+    g.add_node("persona_safety_check", persona_safety_check_node)  # 페르소나 후 안전 검사
+    g.add_node("schedule", schedule_node)
 
     # (그래프 시작 수정)
     g.set_entry_point("input_url")
@@ -86,14 +90,20 @@ def build_graph():
         # 개선이 필요하고, 재시도 횟수가 최대 횟수(2회) 미만이면 개선 진행
         if state.get("needs_improve") and int(state.get("improve_count", 0)) < 2:
             return "improve"
-        
-        # 품질이 좋거나, 이미 3번(0, 1, 2) 시도했으면 다음 단계로
-        # 지식형일 때만 보강 노드로 이동
-        return "augment" if state.get("category") == "지식형" else "quiz"
+        # 품질 통과 시 save_summary 거쳐서 augment/quiz로
+        return "save_summary"
 
     g.add_conditional_edges("judge", route_after_judge, {
-        "improve": "improve", 
-        "augment": "augment", 
+        "improve": "improve",
+        "save_summary": "save_summary"
+    })
+
+    def route_after_save_summary(state: AgentState):
+        """기획서: 지식형→augment, 힐링형→quiz"""
+        return "augment" if state.get("category") == "지식형" else "quiz"
+
+    g.add_conditional_edges("save_summary", route_after_save_summary, {
+        "augment": "augment",
         "quiz": "quiz"
     })
     
@@ -116,9 +126,10 @@ def build_graph():
         "persona": "persona"
     })
 
-    g.add_edge("quiz_improve", "quiz_judge") # 개선 후 다시 평가
-    
-    g.add_edge("persona", "schedule")
+    g.add_edge("quiz_improve", "quiz_judge")
+
+    g.add_edge("persona", "persona_safety_check")  # 페르소나 후 안전 검사
+    g.add_edge("persona_safety_check", "schedule")
     g.add_edge("schedule", END)
 
     return g.compile()
