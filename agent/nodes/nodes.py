@@ -336,6 +336,18 @@ def improve_node(state):
     return state
 
 
+def save_summary_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    기획서 6번: 확정된 3줄 요약본 저장 (quiz/thought 생성 전)
+    judge 통과 후, augment/quiz 노드로 가기 전에 요약을 saved_summary로 확정.
+    LLM 사용 없음, 상태만 업데이트.
+    """
+    summary = state.get("summary", "")
+    state["saved_summary"] = summary
+    print("[Node] save_summary: 확정된 요약 저장 완료")
+    return state
+
+
 def knowledge_augmentation_node(state: Dict[str, Any]):
     """
     지식형 콘텐츠에 대해 추가 정보를 보강합니다. (Tool-calling 방식)
