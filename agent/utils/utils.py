@@ -129,6 +129,39 @@ def calculate_ebbinghaus_dates(base_date: datetime = None) -> List[str]:
     
     return dates
 
+
+def validate_schedule_dates(dates: List[str]) -> tuple:
+    """
+    schedule_dates의 YYYY-MM-DD 형식 및 유효한 날짜인지 검증합니다.
+    
+    Args:
+        dates: 검증할 날짜 문자열 리스트 (예: ["2026-02-12", "2026-02-15"])
+    
+    Returns:
+        (is_valid: bool, validated_dates: List[str], error_message: Optional[str])
+        - is_valid: 모든 날짜가 유효하면 True
+        - validated_dates: 유효한 날짜만 필터링된 리스트 (또는 원본)
+        - error_message: 유효하지 않을 때 오류 설명
+    """
+    if not dates or not isinstance(dates, list):
+        return False, [], "schedule_dates가 비어있거나 리스트가 아닙니다."
+    
+    validated = []
+    for i, d in enumerate(dates):
+        if not isinstance(d, str):
+            return False, [], f"날짜[{i}]가 문자열이 아닙니다: {type(d)}"
+        s = d.strip()
+        if len(s) != 10 or s[4] != "-" or s[7] != "-":
+            return False, [], f"날짜[{i}] 형식 오류 (YYYY-MM-DD 필요): '{d}'"
+        try:
+            datetime.strptime(s, "%Y-%m-%d")
+            validated.append(s)
+        except ValueError:
+            return False, [], f"날짜[{i}] 유효하지 않은 날짜: '{d}'"
+    
+    return True, validated, None
+
+
 def extract_json(text: str) -> dict:
     """
     텍스트에서 JSON 블록을 찾아 파싱합니다.

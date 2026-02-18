@@ -31,6 +31,7 @@ from agent.utils import (
     get_youtube_transcript,
     get_article_content,
     calculate_ebbinghaus_dates,
+    validate_schedule_dates,
     extract_json
 )
 from agent.rag import verify_summary_with_rag
@@ -711,8 +712,17 @@ def schedule_node(state):
     - DB 저장: 프로그램 재시작 후에도 스케줄 유지
     """
     schedule_dates = calculate_ebbinghaus_dates()
+    is_valid, validated_dates, err_msg = validate_schedule_dates(schedule_dates)
+    if not is_valid:
+        print(f"⚠️ [schedule] 날짜 검증 실패: {err_msg}. 재계산 후 진행합니다.")
+        schedule_dates = calculate_ebbinghaus_dates()
+        is_valid, validated_dates, _ = validate_schedule_dates(schedule_dates)
+        if not is_valid:
+            print(f"❌ [schedule] 날짜 검증 재실패. 스케줄 저장을 건너뜁니다.")
+            return state
+    schedule_dates = validated_dates
     state["schedule_dates"] = schedule_dates
-    
+
     print(f"\n📅 에빙하우스 알림 예약 완료:")
     for i, date in enumerate(schedule_dates, 1):
         print(f"  {i}차 알림: {date} 오전 8시")

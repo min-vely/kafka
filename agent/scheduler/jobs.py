@@ -156,8 +156,19 @@ def send_notification_for_schedule(schedule: Dict, target_date: str, notificatio
     from agent.database import get_db
     
     schedule_id = schedule['id']
-    schedule_dates = json.loads(schedule['schedule_dates'])
-    
+    try:
+        schedule_dates = json.loads(schedule['schedule_dates'])
+    except (json.JSONDecodeError, TypeError) as e:
+        print(f"⚠️  스케줄 {schedule_id}: schedule_dates 파싱 오류 - {e}")
+        return
+
+    from agent.utils import validate_schedule_dates
+    is_valid, validated_dates, err_msg = validate_schedule_dates(schedule_dates)
+    if not is_valid:
+        print(f"⚠️  스케줄 {schedule_id}: 날짜 검증 실패 - {err_msg}")
+        return
+    schedule_dates = validated_dates
+
     # 몇 번째 알림인지 확인 (재발송 시에는 직접 전달받음)
     if notification_index is None:
         try:
