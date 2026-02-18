@@ -56,19 +56,21 @@ def build_graph():
 
     # 라우터 함수 추가
     def route_after_extract(state: AgentState):
-        """extract_content_node에서 추출된 내용이 안전한지 판단하여 분기
-        is_safe 결과에 따라 다음 노드를 결정합니다."""
+        """extract_content_node: 추출 실패/콘텐츠 없음 → END, 유해 콘텐츠 → END, 안전 → classify"""
+        if state.get("is_valid") is False:
+            return "INVALID"  # 추출 실패, 요약 불가 URL 등
         if state.get("is_safe") is True:
             return "SAFE"
-        return "UNSAFE"
+        return "UNSAFE"  # 유해 콘텐츠
 
     # 분기 설정
     g.add_conditional_edges(
         "extract_content",
         route_after_extract,
         {
-            "SAFE": "classify",  # 안전하면 분류 노드로
-            "UNSAFE": END  # 유해하면 종료
+            "INVALID": END,  # 추출 실패 / 요약 불가 콘텐츠
+            "SAFE": "classify",
+            "UNSAFE": END
         }
     )
 
