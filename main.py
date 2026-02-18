@@ -203,10 +203,12 @@ def main():
     result = graph.invoke(initial_state)
 
     # 🆕 에이전틱 레이어: 최종 메시지 내 일정이 있다면 구글 캘린더 등록 링크 생성
-    from agent.agent_tools import run_calendar_agent
+    from agent.tools.calendar_event_adder import run_calendar_agent
     if result.get("styled_content"):
         # 기존 페르소나 적용 메시지를 에이전트가 검토하여 업데이트
-        result["styled_content"] = run_calendar_agent(result["styled_content"])
+        combined_input = f"원본정보: {result.get('context', '')}\n요약내용: {result['styled_content']}"
+        result["styled_content"] = run_calendar_agent(combined_input)
+
 
     # 최종 결과 출력
     pretty_print(result)
