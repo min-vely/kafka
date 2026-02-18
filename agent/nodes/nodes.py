@@ -169,25 +169,32 @@ def extract_content_node(state):
     except Exception as e:
         return {"is_valid": False, "is_safe": False, "messages": f"Safety Check 에러: {str(e)}"}
 
+def classify_content(text: str) -> str:
+    """
+    텍스트를 지식형/힐링형으로 분류합니다.
+    classify_node 및 정확도 평가(evaluate_classify_accuracy)에서 공통 사용.
+    """
+    try:
+        resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + (text or "")[:2000])
+        raw_output = (resp.content or "").strip()
+    except Exception:
+        return "지식형"
+    if "지식형" in raw_output:
+        return "지식형"
+    if "힐링형" in raw_output:
+        return "힐링형"
+    return "지식형"
+
+
 def classify_node(state):
     """3) 콘텐츠 성격을 분석하여 '지식형' 또는 '힐링형'으로 분류 (CoT 적용)"""
     print("\n[Node] classify_node: 콘텐츠 분류 중...")
     article = state.get("input_text", "")
-
     try:
-        resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + article[:2000])
-        raw_output = (resp.content or "").strip()
+        category = classify_content(article)
     except Exception as e:
         print(f"⚠️ 분류 중 오류: {e}. 기본값(지식형) 사용.")
-        raw_output = ""
-
-    if "지식형" in raw_output:
         category = "지식형"
-    elif "힐링형" in raw_output:
-        category = "힐링형"
-    else:
-        category = "지식형"
-
     state["category"] = category
     return state
 

@@ -125,6 +125,12 @@ python3 tests/test_database.py
 python3 tests/test_popup.py
 ```
 
+### classify 정확도 평가
+```bash
+python3 scripts/evaluate_classify_accuracy.py
+# --fixture tests/fixtures/classify_samples.json (기본값)
+```
+
 ## 📚 문서
 
 - [데이터베이스 가이드](docs/DATABASE_GUIDE.md)
