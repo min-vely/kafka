@@ -70,4 +70,4 @@ def get_latest_update_analysis(summary_text: str) -> str:
         return (analysis_resp.content or "").strip()
 
     except Exception as e:
-        return f"(웹 서치 및 분석 중 오류 발생: {str(e)})"
+        return f"웹 서치 및 분석 중 오류 발생: {str(e)}"

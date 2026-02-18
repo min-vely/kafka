@@ -38,7 +38,7 @@ def process_one_from_queue(db):
         initial_state = {
             "user_input": url,
             "input_text": "",
-            "max_improve": 2
+            "max_improve": 3
         }
         
         result = graph.invoke(initial_state)

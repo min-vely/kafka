@@ -83,11 +83,11 @@ def get_article_content(url: str) -> str:
         response.raise_for_status()
         
         content = response.text
-        # 본문이 너무 짧으면 뉴스 기사가 아닐 확률이 높음
-        ########### 이 부분은 잠시 주석처리 했습니다!!!!!! 본문 짧을 경우를 생각해보고 글자수 제한할거임
-        # if len(content.strip()) < 150:
-        #     raise ValueError("추출된 본문 내용이 너무 짧습니다. 유효한 뉴스 기사 링크인지 확인해주세요.")
-            
+        stripped = content.strip()
+        if len(stripped) < 80:
+            raise ValueError(
+                "추출된 본문이 너무 짧습니다. 요약할 수 없는 페이지(로그인 필요, 결제 등)일 수 있습니다."
+            )
         return content
     except requests.exceptions.Timeout:
         raise ValueError("뉴스 기사를 가져오는 중 타임아웃이 발생했습니다. 다시 시도해주세요.")

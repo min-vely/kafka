@@ -129,9 +129,19 @@ def extract_content_node(state):
                 "messages": "콘텐츠 추출 중 오류가 발생했습니다."
             }
 
-    # 3. 추출된 내용이 아예 없는 경우 방어
-    if not content:
-        return {"is_valid": False, "messages": "분석할 콘텐츠가 없습니다."}
+    # 3. 추출된 내용이 아예 없거나 너무 짧은 경우 (요약 불가 URL)
+    content_stripped = (content or "").strip()
+    if not content_stripped:
+        return {"is_valid": False, "is_safe": False, "messages": "분석할 콘텐츠가 없습니다. 요약할 수 없는 URL이거나 접근이 제한된 페이지일 수 있습니다."}
+    if content_stripped.startswith("Error:"):
+        return {"is_valid": False, "is_safe": False, "messages": content_stripped.replace("Error: ", "")}
+    min_content_len = 100
+    if len(content_stripped) < min_content_len:
+        return {
+            "is_valid": False,
+            "is_safe": False,
+            "messages": f"추출된 본문이 너무 짧습니다({len(content_stripped)}자). 유효한 기사/동영상 링크인지 확인해주세요."
+        }
 
     # 4. Safety Check (LLM활용)
     try:
@@ -161,18 +171,22 @@ def extract_content_node(state):
 def classify_node(state):
     """3) 콘텐츠 성격을 분석하여 '지식형' 또는 '힐링형'으로 분류 (CoT 적용)"""
     print("\n[Node] classify_node: 콘텐츠 분류 중...")
-    article = state["input_text"]
-    resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + article[:2000])
-    raw_output = (resp.content or "").strip()
-    
-    # "Category: [지식형]" 또는 "Category: [힐링형]"에서 추출
+    article = state.get("input_text", "")
+
+    try:
+        resp = llm.invoke(CLASSIFY_PROMPT + "\n\n[CONTENT]\n" + article[:2000])
+        raw_output = (resp.content or "").strip()
+    except Exception as e:
+        print(f"⚠️ 분류 중 오류: {e}. 기본값(지식형) 사용.")
+        raw_output = ""
+
     if "지식형" in raw_output:
         category = "지식형"
     elif "힐링형" in raw_output:
         category = "힐링형"
     else:
         category = "지식형"
-        
+
     state["category"] = category
     return state
 
@@ -180,10 +194,18 @@ def classify_node(state):
 def synthesize_node(state):
     """4) 기사 원문으로 요약 초안(draft_summary)만 생성 (RAG 사용 X)"""
     print("[Node] synthesize_node: 요약 초안 생성 중...")
-    article = state["input_text"]
+    article = state.get("input_text", "")
 
-    resp = llm.invoke(SUMMARY_DRAFT_PROMPT + "\n\n[ARTICLE]\n" + article)
-    draft = (resp.content or "").strip()
+    try:
+        resp = llm.invoke(SUMMARY_DRAFT_PROMPT + "\n\n[ARTICLE]\n" + article)
+        draft = (resp.content or "").strip()
+        if not draft:
+            draft = (article[:500] + "...") if len(article) > 500 else article
+            print("⚠️ LLM 요약이 비어 있어 원문 발췌를 사용합니다.")
+    except Exception as e:
+        print(f"⚠️ 요약 생성 중 오류: {e}")
+        draft = (article[:500] + "...") if len(article) > 500 else article
+        draft = f"{draft}\n\n(요약 생성 중 오류 발생, 원문 발췌)"
 
     state["draft_summary"] = draft
     return state
@@ -192,18 +214,31 @@ def synthesize_node(state):
 def verify_node(state):
     """5) 요약 초안을 RAG로 검증(근거 문맥 구성/문장 검증 결과 저장)"""
     print("[Node] verify_node: RAG 검증 및 벡터 DB 생성 중 (시간이 소요될 수 있습니다)...")
-    article = state["input_text"]
+    article = state.get("input_text", "")
     draft = state.get("draft_summary", "")
 
-    # rag.py의 원본 verify_summary_with_rag 호출 (시그니처에 맞춰 직접 전달)
-    verified = verify_summary_with_rag(
-        llm=llm,
-        article_text=article,
-        summary_draft=draft,
-        per_sentence_k=3,
-        relevance_threshold=0.12,
-        max_context_chars=2800
-    )
+    try:
+        verified = verify_summary_with_rag(
+            llm=llm,
+            article_text=article,
+            summary_draft=draft,
+            per_sentence_k=3,
+            relevance_threshold=0.12,
+            max_context_chars=2800
+        )
+    except Exception as e:
+        print(f"⚠️ RAG 검증 중 오류: {e}. 초안을 그대로 사용합니다.")
+        verified_summary = re.sub(r"\s+", " ", (draft or "").strip())
+        state["query"] = ""
+        state["context"] = ""
+        state["citations"] = []
+        state["unsupported_sentences"] = []
+        state["summary"] = json.dumps(
+            {"Summary": verified_summary, "UsedCitations": [], "Citations": []},
+            ensure_ascii=False,
+        )
+        state["needs_improve"] = False  # 검증 실패 시 개선 루프 생략
+        return state
 
     state["query"] = verified.get("query", "")
     state["context"] = verified.get("context", "")
@@ -211,8 +246,6 @@ def verify_node(state):
     state["unsupported_sentences"] = verified.get("unsupported_sentences", [])
 
     verified_summary = verified.get("verified_summary", "")
-
-    # 🔧 공백 정리 (이상한 이중 공백 제거)
     verified_summary = re.sub(r"\s+", " ", verified_summary).strip()
 
     state["summary"] = json.dumps(
@@ -224,9 +257,7 @@ def verify_node(state):
         ensure_ascii=False,
     )
 
-    # 컨텍스트가 비었거나 unsupported가 있으면 개선 루프
     state["needs_improve"] = (not str(state["context"]).strip()) or (len(state["unsupported_sentences"]) > 0)
-
     return state
 
 
@@ -241,17 +272,20 @@ def judge_node(state):
     except Exception:
         summary_text = str(summary_json)
 
-    resp = llm.invoke(
-        JUDGE_PROMPT
-        + "\n\n[CONTEXT]\n"
-        + str(context)
-        + "\n\n[SUMMARY]\n"
-        + str(summary_text)
-    )
-
-    parsed = extract_json(resp.content or "")
-    if not parsed:
-        parsed = {"score": 0, "needs_improve": True, "notes": "채점 JSON 추출 실패"}
+    try:
+        resp = llm.invoke(
+            JUDGE_PROMPT
+            + "\n\n[CONTEXT]\n"
+            + str(context)
+            + "\n\n[SUMMARY]\n"
+            + str(summary_text)
+        )
+        parsed = extract_json(resp.content or "")
+        if not parsed:
+            parsed = {"score": 0, "needs_improve": True, "notes": "채점 JSON 추출 실패"}
+    except Exception as e:
+        print(f"⚠️ 채점 중 오류: {e}. needs_improve=False로 진행.")
+        parsed = {"score": 7, "needs_improve": False, "notes": "채점 실패로 통과 처리"}
 
     score = int(parsed.get("score", 0))
     needs_improve = bool(parsed.get("needs_improve", score < 7))
@@ -272,26 +306,30 @@ def judge_node(state):
 
 
 def improve_node(state):
-    """7) CONTEXT 기반으로 draft_summary(초안) 개선"""
-    max_improve = int(state.get("max_improve", 2))
+    """7) CONTEXT 기반으로 draft_summary(초안) 개선. max_improve회 초과 시 마지막 요약으로 확정."""
+    max_improve = int(state.get("max_improve", 3))
     count = int(state.get("improve_count", 0))
 
     if count >= max_improve:
         state["needs_improve"] = False
+        print(f"⚠️ 요약 개선 {max_improve}회 도달. 마지막 요약으로 확정합니다.")
         return state
 
     context = state.get("context", "")
     draft = state.get("draft_summary", "")
 
-    resp = llm.invoke(
-        IMPROVE_DRAFT_PROMPT
-        + "\n\n[CONTEXT]\n"
-        + str(context)
-        + "\n\n[SUMMARY_DRAFT]\n"
-        + str(draft)
-    )
-
-    improved_draft = (resp.content or "").strip()
+    try:
+        resp = llm.invoke(
+            IMPROVE_DRAFT_PROMPT
+            + "\n\n[CONTEXT]\n"
+            + str(context)
+            + "\n\n[SUMMARY_DRAFT]\n"
+            + str(draft)
+        )
+        improved_draft = (resp.content or "").strip()
+    except Exception as e:
+        print(f"⚠️ 요약 개선 중 오류: {e}. 기존 초안 유지.")
+        improved_draft = draft
     state["draft_summary"] = improved_draft
     state["improve_count"] = count + 1
 
@@ -381,39 +419,40 @@ def quiz_node(state):
 
     # 1. 지식형: 퀴즈만 생성
     if category == "지식형":
-        resp_quiz = llm.invoke(QUIZ_FROM_SUMMARY_PROMPT + "\n\n[SUMMARY]\n" + str(summary_text))
-        quiz_obj = extract_json(resp_quiz.content or "")
-        if quiz_obj and isinstance(quiz_obj, dict) and "questions" in quiz_obj:
-            state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
-            state["questions"] = quiz_obj["questions"]
-    
+        try:
+            resp_quiz = llm.invoke(QUIZ_FROM_SUMMARY_PROMPT + "\n\n[SUMMARY]\n" + str(summary_text))
+            quiz_obj = json.loads(resp_quiz.content or "{}")
+            if quiz_obj and isinstance(quiz_obj, dict) and "questions" in quiz_obj:
+                state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
+                state["questions"] = quiz_obj["questions"]
+        except Exception as e:
+            print(f"⚠️ 퀴즈 생성 중 오류: {e}")
+
     # 2. 힐링형: 생각 유도 질문만 생성
     else:
-        resp_thought = llm.invoke(
-            THOUGHT_QUESTION_PROMPT 
-            + f"\n\n[CATEGORY]: {category}"
-            + "\n\n[SUMMARY]\n" + str(summary_text)
-        )
-        # THOUGHT_QUESTION_PROMPT는 ["Q1", "Q2"] 형태의 리스트를 기대함
-        # extract_json은 { } 형태만 찾으므로 리스트용 파싱도 고려
-        content = (resp_thought.content or "").strip()
-        # 마크다운 제거
-        content = re.sub(r"```json\s*(.*?)\s*```", r"\1", content, flags=re.DOTALL)
-        content = re.sub(r"```\s*(.*?)\s*```", r"\1", content, flags=re.DOTALL)
-        
         try:
-            # 리스트 형태 파싱 시도
+            resp_thought = llm.invoke(
+                THOUGHT_QUESTION_PROMPT
+                + f"\n\n[CATEGORY]: {category}"
+                + "\n\n[SUMMARY]\n"
+                + str(summary_text)
+            )
+            
+            content = (resp_thought.content or "").strip()
+            # develop에 추가된 마크다운 및 정규식 제거 로직 적용
+            content = re.sub(r"```json\s*(.*?)\s*```", r"\1", content, flags=re.DOTALL)
+            content = re.sub(r"```\s*(.*?)\s*```", r"\1", content, flags=re.DOTALL)
+            
             match = re.search(r"(\[.*\])", content, re.DOTALL)
             if match:
                 thought_questions = json.loads(match.group(1))
                 state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
             else:
-                # { } 형태면 extract_json 사용
                 thought_questions = extract_json(content)
                 if isinstance(thought_questions, list):
                     state["thought_questions"] = thought_questions
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️ 생각 유도 질문 생성 중 오류: {e}")
 
     return state
 
@@ -571,9 +610,13 @@ def persona_node(state):
         persona_definition=json.dumps(persona_def, ensure_ascii=False),
         content=content_to_style
     )
-    
-    resp = llm.invoke(prompt)
-    styled_content = (resp.content or "").strip()
+
+    try:
+        resp = llm.invoke(prompt)
+        styled_content = (resp.content or "").strip()
+    except Exception as e:
+        print(f"⚠️ 페르소나 적용 중 오류: {e}. 원본 요약 사용.")
+        styled_content = content_to_style
     
     # 상태 업데이트
     state["persona_style"] = persona_def["name"]
@@ -671,11 +714,10 @@ def schedule_node(state):
         print("   해결: pip3 install plyer")
     except Exception as e:
         print(f"\n⚠️  알림 발송 중 오류: {e}")
-    
-    # 🆕 윈도우에서 알림이 사라지는 문제 해결을 위해 잠시 대기
-    if os.name == 'nt':
+
+    # 윈도우에서 알림이 사라지는 문제 해결을 위해 잠시 대기
+    if os.name == "nt":
         print("\n🔔 [Windows] 알림이 화면에 나타날 때까지 기다리는 중입니다...")
         print("   (알림이 뜨지 않는다면 엔터를 눌러 진행하세요)")
-        # input(">>> 엔터를 누르면 계속합니다...") # 주석 해제하여 테스트 가능
-    
+
     return state

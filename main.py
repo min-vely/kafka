@@ -1,6 +1,11 @@
 import os
 import argparse
 import json
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from agent.graph import build_graph
 #유틸 모두 graph로 이동
 
@@ -190,7 +195,7 @@ def main():
     initial_state = {
         "user_input": source_input,  # URL이나 직접 입력한 텍스트
         "input_text": input_text,  # 파일에서 읽어온 '본문' 내용 (여기에 넣어줘야 함!)
-        "max_improve": 2
+        "max_improve": 3  # 3회 초과 시 마지막 요약으로 확정
     }
     
     # # URL이 있으면 추가(input_url로 기능 이동)
@@ -200,15 +205,20 @@ def main():
     # pretty_print(result)
 
     # 그래프 실행 및 결과 획득
-    result = graph.invoke(initial_state)
+    try:
+        result = graph.invoke(initial_state)
+    except Exception as e:
+        print(f"\n❌ 처리 중 오류가 발생했습니다: {e}")
+        raise
 
     # 🆕 에이전틱 레이어: 최종 메시지 내 일정이 있다면 구글 캘린더 등록 링크 생성
     from agent.tools.calendar_event_adder import run_calendar_agent
     if result.get("styled_content"):
-        # 기존 페르소나 적용 메시지를 에이전트가 검토하여 업데이트
-        combined_input = f"원본정보: {result.get('context', '')}\n요약내용: {result['styled_content']}"
-        result["styled_content"] = run_calendar_agent(combined_input)
-
+        try:
+            combined_input = f"원본정보: {result.get('context', '')}\n요약내용: {result['styled_content']}"
+            result["styled_content"] = run_calendar_agent(combined_input)
+        except Exception as e:
+            print(f"⚠️ 캘린더 에이전트 실행 중 오류 (무시하고 계속): {e}")
 
     # 최종 결과 출력
     pretty_print(result)
