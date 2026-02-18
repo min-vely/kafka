@@ -1,4 +1,5 @@
 import re
+import json
 import requests
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
@@ -127,3 +128,35 @@ def calculate_ebbinghaus_dates(base_date: datetime = None) -> List[str]:
         dates.append(target_date.strftime("%Y-%m-%d"))
     
     return dates
+
+def extract_json(text: str) -> dict:
+    """
+    텍스트에서 JSON 블록을 찾아 파싱합니다.
+    마크다운 태그(```json)나 서문/결문이 섞여 있어도 최대한 추출합니다.
+    """
+    if not text:
+        return {}
+        
+    # 1. 마크다운 코드 블록 제거 (```json ... ```)
+    clean_text = re.sub(r"```json\s*(.*?)\s*```", r"\1", text, flags=re.DOTALL)
+    clean_text = re.sub(r"```\s*(.*?)\s*```", r"\1", clean_text, flags=re.DOTALL)
+    
+    # 2. 가장 바깥쪽 { } 찾기
+    match = re.search(r"(\{.*\})", clean_text, re.DOTALL)
+    if match:
+        json_str = match.group(0)
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+            
+    # 3. 정규표현식 실패 시 최후의 수단: 직접 { } 인덱스 찾기
+    try:
+        start_idx = text.find("{")
+        end_idx = text.rfind("}")
+        if start_idx != -1 and end_idx != -1:
+            return json.loads(text[start_idx : end_idx + 1])
+    except:
+        pass
+        
+    return {}
