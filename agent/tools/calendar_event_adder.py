@@ -1,11 +1,4 @@
-"""
-[Agent Tools Module]
-이 모듈은 Upstage Solar 모델을 사용하여 텍스트 내 일정을 추출하고 
-구글 캘린더 등록 링크를 생성하는 에이전트 도구를 포함합니다.
-
-필요 라이브러리 설치:
-pip install -U langchain langchain-community langchain-upstage langchainhub
-"""
+# agent/tools/calendar_event_adder.py
 
 import os
 import urllib.parse
