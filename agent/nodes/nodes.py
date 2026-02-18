@@ -15,6 +15,8 @@ from agent.prompts import (
     IMPROVE_DRAFT_PROMPT,
     CLASSIFY_PROMPT,
     THOUGHT_QUESTION_PROMPT,
+    QUIZ_JUDGE_PROMPT,
+    QUIZ_IMPROVE_PROMPT,
     KNOWLEDGE_TYPE_CLASSIFY_PROMPT,
     TAVILY_QUERY_GENERATOR_PROMPT,
     UPDATE_ANALYSIS_PROMPT,
@@ -28,7 +30,8 @@ from agent.utils import (
     extract_youtube_video_id,
     get_youtube_transcript,
     get_article_content,
-    calculate_ebbinghaus_dates
+    calculate_ebbinghaus_dates,
+    extract_json
 )
 from agent.rag import verify_summary_with_rag
 from agent.database import get_db
@@ -246,17 +249,22 @@ def judge_node(state):
         + str(summary_text)
     )
 
-    try:
-        parsed = json.loads(resp.content)
-    except Exception:
-        parsed = {"score": 0, "needs_improve": True, "notes": "채점 JSON 파싱 실패"}
+    parsed = extract_json(resp.content or "")
+    if not parsed:
+        parsed = {"score": 0, "needs_improve": True, "notes": "채점 JSON 추출 실패"}
 
     score = int(parsed.get("score", 0))
     needs_improve = bool(parsed.get("needs_improve", score < 7))
+    notes = parsed.get("notes", "")
 
     if state.get("unsupported_sentences"):
         needs_improve = True
         score = min(score, 6)
+        notes += " (미지원 문장 존재)"
+
+    print(f"\n⚖️ [요약 평가] 점수: {score}/10 | 개선 필요: {needs_improve}")
+    if notes:
+        print(f"   📝 피드백: {notes}")
 
     state["judge_score"] = score
     state["needs_improve"] = needs_improve
@@ -374,13 +382,10 @@ def quiz_node(state):
     # 1. 지식형: 퀴즈만 생성
     if category == "지식형":
         resp_quiz = llm.invoke(QUIZ_FROM_SUMMARY_PROMPT + "\n\n[SUMMARY]\n" + str(summary_text))
-        try:
-            quiz_obj = json.loads(resp_quiz.content)
-            if isinstance(quiz_obj, dict) and "questions" in quiz_obj:
-                state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
-                state["questions"] = quiz_obj["questions"] # ✅ 퀴즈 리스트 직접 저장
-        except Exception:
-            pass
+        quiz_obj = extract_json(resp_quiz.content or "")
+        if quiz_obj and isinstance(quiz_obj, dict) and "questions" in quiz_obj:
+            state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
+            state["questions"] = quiz_obj["questions"]
     
     # 2. 힐링형: 생각 유도 질문만 생성
     else:
@@ -389,14 +394,131 @@ def quiz_node(state):
             + f"\n\n[CATEGORY]: {category}"
             + "\n\n[SUMMARY]\n" + str(summary_text)
         )
+        # THOUGHT_QUESTION_PROMPT는 ["Q1", "Q2"] 형태의 리스트를 기대함
+        # extract_json은 { } 형태만 찾으므로 리스트용 파싱도 고려
+        content = (resp_thought.content or "").strip()
+        # 마크다운 제거
+        content = re.sub(r"```json\s*(.*?)\s*```", r"\1", content, flags=re.DOTALL)
+        content = re.sub(r"```\s*(.*?)\s*```", r"\1", content, flags=re.DOTALL)
+        
         try:
-            thought_questions = json.loads(resp_thought.content)
-            state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
-        except Exception:
+            # 리스트 형태 파싱 시도
+            match = re.search(r"(\[.*\])", content, re.DOTALL)
+            if match:
+                thought_questions = json.loads(match.group(1))
+                state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
+            else:
+                # { } 형태면 extract_json 사용
+                thought_questions = extract_json(content)
+                if isinstance(thought_questions, list):
+                    state["thought_questions"] = thought_questions
+        except:
             pass
 
     return state
 
+
+def quiz_judge_node(state):
+    """(🆕) 생성된 퀴즈/생각유도질문 품질 평가"""
+    category = state.get("category", "지식형")
+    summary_raw = state.get("summary", "")
+    
+    label = "퀴즈 평가" if category == "지식형" else "생각 유도 질문 평가"
+    
+    try:
+        s_obj = json.loads(summary_raw)
+        summary_text = s_obj.get("Summary", summary_raw)
+    except:
+        summary_text = str(summary_raw)
+
+    # 평가할 콘텐츠 준비
+    if category == "지식형":
+        content_to_judge = state.get("quiz", "")
+    else:
+        content_to_judge = json.dumps(state.get("thought_questions", []), ensure_ascii=False)
+
+    if not content_to_judge or content_to_judge in ('{"questions": []}', '[]'):
+        state["quiz_judge_score"] = 0
+        state["quiz_needs_improve"] = True
+        print(f"\n📊 [{label}] 점수: 0/10 | 개선 필요: True (콘텐츠 없음)")
+        return state
+
+    resp = llm.invoke(
+        QUIZ_JUDGE_PROMPT
+        + "\n\n[요약본]\n" + summary_text
+        + "\n\n[콘텐츠]\n" + content_to_judge
+    )
+
+    parsed = extract_json(resp.content or "")
+    if parsed:
+        state["quiz_judge_score"] = int(parsed.get("score", 0))
+        state["quiz_needs_improve"] = bool(parsed.get("needs_improve", state["quiz_judge_score"] < 7))
+        state["quiz_notes"] = parsed.get("notes", "")
+    else:
+        state["quiz_judge_score"] = 0
+        state["quiz_needs_improve"] = True
+        state["quiz_notes"] = "평가 결과 JSON 추출 실패"
+
+    print(f"\n📊 [{label}] 점수: {state['quiz_judge_score']}/10 | 개선 필요: {state['quiz_needs_improve']}")
+    if state["quiz_notes"]:
+        print(f"   📝 피드백: {state['quiz_notes']}")
+
+    return state
+
+
+def quiz_improve_node(state):
+    """(🆕) 평가 결과를 바탕으로 퀴즈/질문 재작성"""
+    max_improve = 2 # 총 3회 시도 (초기 생성 1회 + 재시도 2회)
+    count = int(state.get("quiz_improve_count", 0))
+
+    # 이미 최대 횟수에 도달했으면 개선 중단
+    if count >= max_improve:
+        state["quiz_needs_improve"] = False
+        print(f"⚠️ 퀴즈/질문 최대 재시도 횟수({max_improve}회) 도달. 마지막 버전을 사용합니다.")
+        return state
+
+    print(f"🔄 퀴즈/질문 재작성 중... (시도 횟수: {count + 1}/{max_improve})")
+    
+    category = state.get("category", "지식형")
+    summary_raw = state.get("summary", "")
+    try:
+        s_obj = json.loads(summary_raw)
+        summary_text = s_obj.get("Summary", summary_raw)
+    except:
+        summary_text = str(summary_raw)
+
+    if category == "지식형":
+        original_content = state.get("quiz", "")
+    else:
+        original_content = json.dumps(state.get("thought_questions", []), ensure_ascii=False)
+
+    prompt = QUIZ_IMPROVE_PROMPT.format(
+        summary_text=summary_text,
+        notes=state.get("quiz_notes", "품질 개선 필요"),
+        original_content=original_content
+    )
+
+    resp = llm.invoke(prompt)
+    improved_content = (resp.content or "").strip()
+
+    # 업데이트 및 카운트 증가
+    if category == "지식형":
+        try:
+            quiz_obj = json.loads(improved_content)
+            if isinstance(quiz_obj, dict) and "questions" in quiz_obj:
+                state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
+                state["questions"] = quiz_obj["questions"]
+        except:
+            pass
+    else:
+        try:
+            thought_questions = json.loads(improved_content)
+            state["thought_questions"] = thought_questions if isinstance(thought_questions, list) else []
+        except:
+            pass
+
+    state["quiz_improve_count"] = count + 1
+    return state
 
 
 # ============================================================

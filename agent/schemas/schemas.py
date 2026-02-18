@@ -35,6 +35,11 @@ class AgentState(TypedDict, total=False):
     improve_count: int
     max_improve: int
 
+    # 🆕 퀴즈/질문 평가 및 재시도 제어
+    quiz_judge_score: int
+    quiz_needs_improve: bool
+    quiz_improve_count: int
+
     # persona & scheduling (에빙하우스 주기)
     persona_style: str  # 현재 적용할 페르소나 유형
     persona_count: int  # 페르소나 순환 카운터 (0-9, 10개 페르소나 순차 적용)
