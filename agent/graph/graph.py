@@ -1,19 +1,20 @@
 from langgraph.graph import StateGraph, END
 from agent.schemas import AgentState
 from agent.nodes import (
-    input_url_node,  # URL 검증 노드
-    extract_content_node,  # URL text 추출 및 콘텐츠 검증
+    input_url_node,
+    extract_content_node,
     classify_node,
     synthesize_node,
     verify_node,
     judge_node,
     improve_node,
-    save_summary_node,  # 기획서 6번: 확정된 요약 저장
+    save_summary_node,
     knowledge_augmentation_node,
     quiz_node,
     quiz_judge_node,
     quiz_improve_node,
     persona_node,
+    persona_safety_check_node,  # 페르소나 후 안전 검사
     schedule_node,
 )
 
@@ -33,8 +34,9 @@ def build_graph():
     g.add_node("quiz", quiz_node)
     g.add_node("quiz_judge", quiz_judge_node) # 🆕 추가
     g.add_node("quiz_improve", quiz_improve_node) # 🆕 추가
-    g.add_node("persona", persona_node)  # 페르소나 적용 노드
-    g.add_node("schedule", schedule_node)  # 스케줄링 노드
+    g.add_node("persona", persona_node)
+    g.add_node("persona_safety_check", persona_safety_check_node)  # 페르소나 후 안전 검사
+    g.add_node("schedule", schedule_node)
 
     # (그래프 시작 수정)
     g.set_entry_point("input_url")
@@ -124,9 +126,10 @@ def build_graph():
         "persona": "persona"
     })
 
-    g.add_edge("quiz_improve", "quiz_judge") # 개선 후 다시 평가
-    
-    g.add_edge("persona", "schedule")
+    g.add_edge("quiz_improve", "quiz_judge")
+
+    g.add_edge("persona", "persona_safety_check")  # 페르소나 후 안전 검사
+    g.add_edge("persona_safety_check", "schedule")
     g.add_edge("schedule", END)
 
     return g.compile()

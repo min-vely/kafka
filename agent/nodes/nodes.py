@@ -639,6 +639,55 @@ def persona_node(state):
 
 
 # ============================================================
+# 페르소나 후 안전 검사 노드 (기획서: persona Llama Guard)
+# ============================================================
+
+def persona_safety_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    페르소나 적용된 styled_content에 대한 유해성 검사.
+    UNSAFE 시 페르소나 스타일을 제거한 원본 콘텐츠로 대체하여 schedule로 진행.
+    """
+    styled_content = state.get("styled_content", "")
+    if not styled_content:
+        return state
+
+    check_text = styled_content[:2000]
+    try:
+        safety_llm = llm.invoke(SAFETY_PROMPT + "\n\n[CONTENT]\n" + check_text)
+        safety_response = (safety_llm.content or "").strip().upper()
+
+        if "UNSAFE" in safety_response:
+            print("⚠️ [persona_safety_check] 페르소나 적용 콘텐츠가 유해로 판정됨. 원본으로 대체합니다.")
+            # 페르소나 미적용 원본 콘텐츠로 대체
+            try:
+                s_obj = json.loads(state.get("summary", ""))
+                summary_text = s_obj.get("Summary", "")
+            except Exception:
+                summary_text = str(state.get("summary", ""))
+
+            category = state.get("category", "지식형")
+            if category == "지식형":
+                quiz_text = state.get("quiz", "")
+                aug_info = state.get("augmentation_info", "")
+                fallback = f"[요약]\n{summary_text}\n\n[퀴즈]\n{quiz_text}"
+                if aug_info:
+                    fallback += f"\n\n{aug_info}"
+            else:
+                thought_text = "\n".join(state.get("thought_questions", []))
+                fallback = f"[요약]\n{summary_text}\n\n[생각 유도 질문]\n{thought_text}"
+
+            state["styled_content"] = fallback
+            state["persona_style"] = "(안전 검사 통과용 기본형)"
+        else:
+            print("✅ [persona_safety_check] 페르소나 콘텐츠 안전 검사 통과")
+
+    except Exception as e:
+        print(f"⚠️ [persona_safety_check] 검사 중 오류: {e}. 원본 유지.")
+
+    return state
+
+
+# ============================================================
 # 에빙하우스 스케줄링 노드
 # ============================================================
 
