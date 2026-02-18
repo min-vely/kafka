@@ -416,6 +416,7 @@ def quiz_node(state):
             quiz_obj = json.loads(resp_quiz.content or "{}")
             if isinstance(quiz_obj, dict) and "questions" in quiz_obj:
                 state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
+                state["questions"] = quiz_obj["questions"]
         except Exception as e:
             print(f"⚠️ 퀴즈 생성 중 오류: {e}")
 
@@ -591,5 +592,10 @@ def schedule_node(state):
         print("   해결: pip3 install plyer")
     except Exception as e:
         print(f"\n⚠️  알림 발송 중 오류: {e}")
-    
+
+    # 윈도우에서 알림이 사라지는 문제 해결을 위해 잠시 대기
+    if os.name == "nt":
+        print("\n🔔 [Windows] 알림이 화면에 나타날 때까지 기다리는 중입니다...")
+        print("   (알림이 뜨지 않는다면 엔터를 눌러 진행하세요)")
+
     return state
