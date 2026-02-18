@@ -2,7 +2,7 @@
 import os
 import json
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 from langchain_upstage import ChatUpstage
 from agent.tools.get_latest_update_analysis import get_latest_update_analysis
@@ -37,6 +37,97 @@ from agent.rag import verify_summary_with_rag
 from agent.database import get_db
 
 load_dotenv()
+
+def _safe_parse_quiz(raw: str) -> Optional[Dict[str, Any]]:
+    """
+    LLM 응답을 안전하게:
+    1) code fence 제거
+    2) 첫 JSON 추출
+    3) 스키마 정규화
+    실패 시 None
+    """
+
+    if not raw:
+        return None
+
+    # fence 제거 + strip
+    s = re.sub(r"```.*?```", "", raw, flags=re.DOTALL).strip()
+
+    # 첫 JSON object 추출 (greedy 방지)
+    match = re.search(r"\{[\s\S]*\}", s)
+    if not match:
+        return None
+
+    try:
+        obj = json.loads(match.group())
+    except Exception:
+        return None
+
+    questions = obj.get("questions")
+    if not isinstance(questions, list) or len(questions) != 5:
+        return None
+
+    normalized = []
+    letters = ["A", "B", "C", "D"]
+
+    for q in questions:
+        text = q.get("text") or q.get("question")
+        options = q.get("options")
+        answer = q.get("answer")
+
+        if not text or not isinstance(options, list) or len(options) != 4:
+            return None
+
+        # 옵션 A) prefix 강제
+        fixed_opts = []
+        for i, opt in enumerate(options):
+            opt = opt.strip()
+            if not opt.startswith(letters[i]):
+                opt = f"{letters[i]}) {opt}"
+            fixed_opts.append(opt)
+
+        # answer 정규화
+        if answer not in letters:
+            for i, opt in enumerate(options):
+                if answer and answer in opt:
+                    answer = letters[i]
+                    break
+            else:
+                return None
+
+        normalized.append({
+            "text": text.strip(),
+            "options": fixed_opts,
+            "answer": answer
+        })
+
+    return {"questions": normalized}
+
+
+def _fallback_quiz(summary: str) -> Dict[str, Any]:
+    text = re.sub(r"\s+", " ", (summary or "").strip())
+    if not text:
+        return {"questions": []}
+
+    words = re.findall(r"[가-힣A-Za-z]{3,}", text)
+    words = list(dict.fromkeys(words))[:20]
+
+    questions = []
+    letters = ["A", "B", "C", "D"]
+
+    for i in range(5):
+        target = words[i] if i < len(words) else f"핵심{i+1}"
+        opts = [target] + words[i+1:i+4]
+        while len(opts) < 4:
+            opts.append("해당 없음")
+
+        questions.append({
+            "text": f"요약문과 가장 관련 깊은 키워드는 무엇인가?",
+            "options": [f"{letters[j]}) {opts[j]}" for j in range(4)],
+            "answer": "A"
+        })
+
+    return {"questions": questions}
 
 
 # -----------------------------
@@ -420,13 +511,53 @@ def quiz_node(state):
     # 1. 지식형: 퀴즈만 생성
     if category == "지식형":
         try:
-            resp_quiz = llm.invoke(QUIZ_FROM_SUMMARY_PROMPT + "\n\n[SUMMARY]\n" + str(summary_text))
-            quiz_obj = json.loads(resp_quiz.content or "{}")
-            if quiz_obj and isinstance(quiz_obj, dict) and "questions" in quiz_obj:
-                state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
-                state["questions"] = quiz_obj["questions"]
+            # 1) "JSON만" 강제하는 래퍼 프롬프트 (최소 diff: 기존 prompt 위에 덧씌움)
+            strict_wrapper = (
+                "반드시 JSON만 출력해라. 다른 텍스트/설명/마크다운/코드펜스 절대 금지.\n"
+                "스키마는 정확히 다음을 따른다:\n"
+                '{"questions":[{"question":"...","options":["...","...","...","..."],"answer":"...","explanation":"..."}]}\n'
+                "- questions는 3~5개\n"
+                "- options는 항상 4개\n"
+                "- answer는 options 중 하나의 값(문자열)\n"
+            )
+
+            resp_quiz = llm.invoke(
+                strict_wrapper
+                + "\n\n"
+                + QUIZ_FROM_SUMMARY_PROMPT
+                + "\n\n[SUMMARY]\n"
+                + str(summary_text)
+            )
+
+            raw = (resp_quiz.content or "").strip()
+
+            # 🔵 1) 새 안전 파서 사용
+            quiz_obj = _safe_parse_quiz(raw)
+
+            # 🔵 2) 실패 시 1회 재시도 (기존 로직 유지)
+            if not quiz_obj:
+                retry_prompt = (
+                    "JSON만 출력.\n"
+                    '{"questions":[{"question":"...","options":["A","B","C","D"],"answer":"A","explanation":"..."}]}\n\n'
+                    + "[SUMMARY]\n" + str(summary_text)
+                )
+                resp2 = llm.invoke(retry_prompt)
+                quiz_obj = _safe_parse_quiz(resp2.content or "")
+
+            # 🔵 3) 그래도 실패하면 fallback (5문항 보장)
+            if not quiz_obj:
+                print("⚠️ 퀴즈 JSON 파싱 실패 → fallback 사용")
+                quiz_obj = _fallback_quiz(summary_text)
+
+            state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
+            state["questions"] = quiz_obj.get("questions", [])
+
         except Exception as e:
-            print(f"⚠️ 퀴즈 생성 중 오류: {e}")
+            print(f"⚠️ 퀴즈 생성 중 오류: {e}. fallback 퀴즈를 생성합니다.")
+            quiz_obj = _fallback_make_quiz_from_text(summary_text, n=3)
+            state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
+            state["questions"] = quiz_obj.get("questions", [])
+
 
     # 2. 힐링형: 생각 유도 질문만 생성
     else:
@@ -543,12 +674,28 @@ def quiz_improve_node(state):
     # 업데이트 및 카운트 증가
     if category == "지식형":
         try:
-            quiz_obj = json.loads(improved_content)
-            if isinstance(quiz_obj, dict) and "questions" in quiz_obj:
-                state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
-                state["questions"] = quiz_obj["questions"]
-        except:
-            pass
+            quiz_obj = _safe_parse_quiz(improved_content)
+
+            if not quiz_obj:
+                retry = (
+                    "JSON만 출력.\n"
+                    '{"questions":[{"question":"...","options":["A","B","C","D"],"answer":"A","explanation":"..."}]}\n\n'
+                    + improved_content
+                )
+                resp2 = llm.invoke(retry)
+                quiz_obj = _safe_parse_quiz(resp2.content or "")
+
+            if not quiz_obj:
+                quiz_obj = _fallback_quiz(summary_text)
+
+            state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
+            state["questions"] = quiz_obj.get("questions", [])
+
+        except Exception:
+            quiz_obj = _fallback_make_quiz_from_text(summary_text, n=3)
+            state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
+            state["questions"] = quiz_obj.get("questions", [])
+
     else:
         try:
             thought_questions = json.loads(improved_content)
