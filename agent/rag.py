@@ -312,6 +312,47 @@ def _make_rag_summary(llm: ChatUpstage, context: str) -> str:
         return (resp.content or "").strip()
     except Exception:
         return str(resp).strip()
+    
+def _strip_code_fences(s: str) -> str:
+    s = (s or "").strip()
+    s = re.sub(r"```json\s*", "", s, flags=re.IGNORECASE)
+    s = s.replace("```", "")
+    return s.strip()
+
+def _extract_first_json_obj(raw: str) -> Optional[Dict[str, Any]]:
+    """
+    LLM 응답에서 '첫 번째 JSON 객체'를 안정적으로 추출합니다.
+    (중괄호가 여러 번 등장하거나, 앞/뒤로 잡텍스트가 붙어도 깨지지 않게)
+    """
+    if not raw:
+        return None
+    s = _strip_code_fences(raw)
+
+    # 가장 앞쪽의 '{'부터 시작해서 밸런스 맞는 첫 객체를 추출
+    start = s.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    for i in range(start, len(s)):
+        ch = s[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = s[start : i + 1].strip()
+                try:
+                    obj = json.loads(candidate)
+                    return obj if isinstance(obj, dict) else None
+                except Exception:
+                    return None
+    return None
+
+
+
+
+
 
 
 def _judge_pick_best(
@@ -353,28 +394,41 @@ def _judge_pick_best(
     except Exception:
         raw = str(resp).strip()
 
-    try:
-        data = json.loads(raw)
-        winner = data.get("winner")
-        if winner == "A":
-            return {
-                "winner": "llm",
-                "scoreA": data.get("scoreA"),
-                "scoreB": data.get("scoreB"),
-                "reason": data.get("reason", ""),
-            }
-        if winner == "B":
-            return {
-                "winner": "rag",
-                "scoreA": data.get("scoreA"),
-                "scoreB": data.get("scoreB"),
-                "reason": data.get("reason", ""),
-            }
-    except Exception:
-        pass
+    data = _extract_first_json_obj(raw)
 
-    # 파싱 실패 시: 근거 기반을 우선(안전)
-    return {"winner": "rag", "reason": "judge_parse_failed"}
+    def _valid(d: Dict[str, Any]) -> bool:
+        # 점수 누락은 허용(=None), winner만 확실하면 파싱 성공으로 간주
+        return isinstance(d, dict) and d.get("winner") in ("A", "B")
+
+    if not data or not _valid(data):
+        # 1회 재시도: 더 짧고 강한 프롬프트
+        retry_prompt = (
+            "JSON 한 줄만 출력해라. 다른 텍스트/마크다운/코드펜스 절대 금지.\n"
+            '키는 정확히 winner, scoreA, scoreB, reason.\n'
+            '형식: {"winner":"A"|"B","scoreA":0-10,"scoreB":0-10,"reason":"짧게"}\n\n'
+            f"CONTEXT:\n{context}\n\n"
+            f"A:\n{llm_summary}\n\n"
+            f"B:\n{rag_summary}\n"
+        )
+        resp2 = llm.invoke(retry_prompt)
+        try:
+            raw2 = (resp2.content or "").strip()
+        except Exception:
+            raw2 = str(resp2).strip()
+
+        data = _extract_first_json_obj(raw2)
+
+        if not data or not _valid(data):
+            # ✅ 원인 고정용 로그: 다음에 보면 100% 잡힘
+            print(f"[RAG-A/B] judge_parse_failed_raw_head={_strip_code_fences(raw)[:300]!r}")
+            return {"winner": "rag", "reason": "judge_parse_failed"}
+
+    winner = data.get("winner")
+    if winner == "A":
+        return {"winner": "llm", "scoreA": data.get("scoreA"), "scoreB": data.get("scoreB"), "reason": data.get("reason", "")}
+    else:
+        return {"winner": "rag", "scoreA": data.get("scoreA"), "scoreB": data.get("scoreB"), "reason": data.get("reason", "")}
+
 
 
 # -----------------------------
