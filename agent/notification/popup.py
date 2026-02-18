@@ -15,30 +15,23 @@ import platform
 from typing import List, Optional
 from datetime import datetime
 import subprocess
-from winotify import Notification, audio
 
 # 플랫폼 감지
 OS_TYPE = platform.system()
-WINOTIFY_AVAILABLE = False
-PYNC_AVAILABLE = False
-PLYER_AVAILABLE = False
-
-# Windows용 클릭 가능한 알림 (안정적)
-if OS_TYPE == 'Windows':
-    try:
-        WINOTIFY_AVAILABLE = True
-        print("🔍 [popup.py] Windows winotify 로드 성공")
-    except ImportError:
-        WINOTIFY_AVAILABLE = False
-        print("🔍 [popup.py] Windows winotify 로드 실패 (설치 필요)")
 
 # macOS용 클릭 가능한 알림
-if OS_TYPE == 'Darwin':
-    try:
-        import pync
-        PYNC_AVAILABLE = True
-    except ImportError:
-        PYNC_AVAILABLE = False
+try:
+    import pync
+    PYNC_AVAILABLE = True
+except ImportError:
+    PYNC_AVAILABLE = False
+
+# Windows용 클릭 가능한 알림 (안정적)
+try:
+    from winotify import Notification, audio
+    WINOTIFY_AVAILABLE = True
+except ImportError:
+    WINOTIFY_AVAILABLE = False
 
 # 기본 알림 (클릭 불가)
 try:
@@ -102,18 +95,13 @@ def send_popup_notification(
         # Windows: winotify 사용 (클릭 시 URL 열기 - 안정적)
         elif OS_TYPE == 'Windows' and WINOTIFY_AVAILABLE:
             try:
-                # app_id에 한글/공백이 있으면 윈도우에서 차단당할 확률이 높음
-                # 안정적인 영문 ID 사용
-                safe_app_id = "KafkaAI"
-                
-                toast_args = {
-                    "app_id": safe_app_id,
-                    "title": title,
-                    "msg": message,
-                    "duration": "short" if timeout <= 5 else "long"
-                }
-                
-                toast = Notification(**toast_args)
+                toast = Notification(
+                    app_id="카프카 AI",
+                    title=title,
+                    msg=message,
+                    duration="short" if timeout <= 5 else "long",
+                    icon=app_icon
+                )
                 
                 # 사운드 설정
                 toast.set_audio(audio.Default, loop=False)
@@ -125,7 +113,6 @@ def send_popup_notification(
                         launch=url
                     )
                 
-                print(f"DEBUG: toast.show() 호출 직전 (app_id: {safe_app_id})")
                 toast.show()
                 
                 if url:
