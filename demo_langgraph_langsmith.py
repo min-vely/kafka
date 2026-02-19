@@ -13,6 +13,13 @@ from __future__ import annotations
 
 import argparse
 import os
+from dotenv import load_dotenv
+from pathlib import Path
+
+# demo 파일과 같은 폴더의 .env를 강제로 로드
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
+
+
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Sequence, TypedDict
 
@@ -32,22 +39,17 @@ from langchain_upstage import ChatUpstage
 # -----------------------------
 
 def configure_tracing() -> None:
-    """Make tracing configuration explicit (and visible) in one place."""
-    # LangSmith
     os.environ.setdefault("LANGSMITH_TRACING", "true")
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-
-    # Project name is useful for filtering traces
     os.environ.setdefault("LANGSMITH_PROJECT", "kafka-demo-langgraph")
-
-    # Optional: tag env for easier filtering in LangSmith UI
     os.environ.setdefault("KAFKA_DEMO", "1")
 
-    # Print minimal status (no secrets)
     print("\n[Tracing]")
     print(f"  LANGSMITH_TRACING={os.environ.get('LANGSMITH_TRACING')}")
     print(f"  LANGCHAIN_TRACING_V2={os.environ.get('LANGCHAIN_TRACING_V2')}")
     print(f"  LANGSMITH_PROJECT={os.environ.get('LANGSMITH_PROJECT')}")
+    print(f"  UPSTAGE_API_KEY set={bool(os.environ.get('UPSTAGE_API_KEY'))}")
+
     if not os.environ.get("LANGSMITH_API_KEY"):
         print("  ⚠ LANGSMITH_API_KEY not set (trace won't be uploaded)")
     else:
