@@ -129,6 +129,13 @@ class ScheduleDB:
             )
         ''')
         
+        # 기존 url_queue 테이블에 input_type 컬럼 추가 (ALTER TABLE - 안전하게)
+        try:
+            cursor.execute("ALTER TABLE url_queue ADD COLUMN input_type TEXT DEFAULT 'url'")
+            print("✅ url_queue 테이블에 input_type 컬럼 추가됨")
+        except sqlite3.OperationalError:
+            pass  # 이미 존재하면 무시
+        
         self.conn.commit()
         print(f"✅ 데이터베이스 초기화 완료: {self.db_path}")
     

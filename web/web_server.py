@@ -76,10 +76,12 @@ def main():
     print()
     
     try:
+        # use_reloader=False: 터미널에 graph 처리 로그가 제대로 출력되도록 함
         app.run(
             debug=not args.no_debug,
             host=args.host,
-            port=args.port
+            port=args.port,
+            use_reloader=False
         )
     except KeyboardInterrupt:
         print("\n\n👋 웹 서버를 종료합니다")

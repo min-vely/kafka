@@ -56,7 +56,15 @@ pip3 install -r requirements.txt
 UPSTAGE_API_KEY=your_api_key_here
 ```
 
-### 3. 콘텐츠 처리
+### 3. 실행 (웹 UI 또는 CLI)
+
+**🖥️ 웹 UI 모드 (권장)** – URL 입력부터 퀴즈까지 브라우저에서 처리
+```bash
+python3 main.py
+```
+→ http://localhost:8080 에서 URL 입력, 즉시 처리, 퀴즈 풀기
+
+**⌨️ CLI 모드** – 터미널에서 콘텐츠 처리
 ```bash
 # 텍스트 직접 입력 (즉시 처리)
 python3 main.py --text "AI는 인공지능입니다. 머신러닝은 AI의 하위 분야입니다."
@@ -68,7 +76,7 @@ python3 main.py --url "https://example.com/article"
 python3 main.py --url "https://example.com/article" --process-now
 ```
 
-### 4. 웹 서버 실행 (터미널 1)
+### 4. 웹 서버 직접 실행 (터미널 1)
 ```bash
 # 기본 포트 (5000)
 python3 -m web.web_server
@@ -147,6 +155,7 @@ python3 -m agent.scheduler.scheduler_service --test
 - [퀴즈 시스템 가이드](docs/QUIZ_GUIDE.md)
 - [스케줄러 가이드](docs/SCHEDULER_GUIDE.md)
 - [워크플로우 시각화](docs/WORKFLOW_VISUALIZATION.md)
+- [웹 UI 사용 가이드](docs/WEB_UI_GUIDE.md)
 
 ### 워크플로우 시각화
 ```bash
