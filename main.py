@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agent.graph import build_graph
+from agent.utils import clean_content_for_display
 #유틸 모두 graph로 이동
 
 def pretty_print(result: dict):
@@ -35,9 +36,10 @@ def pretty_print(result: dict):
     print("\n========== SUMMARY ==========")
     try:
         s = json.loads(result.get("summary", "{}"))
-        print(s.get("Summary", s))
+        raw = s.get("Summary", s)
+        print(clean_content_for_display(str(raw) if raw else ""))
     except Exception:
-        print(result.get("summary", ""))
+        print(clean_content_for_display(str(result.get("summary", ""))))
 
     print("\n========== THOUGHT QUESTIONS ==========")
     tq = result.get("thought_questions", [])
@@ -76,7 +78,7 @@ def pretty_print(result: dict):
     styled = result.get("styled_content", "")
     if styled:
         print("\n========== STYLED CONTENT (페르소나 적용) ==========")
-        print(styled)
+        print(clean_content_for_display(styled))
     
     # 🆕 에빙하우스 스케줄 출력
     print("\n========== EBBINGHAUS SCHEDULE ==========")

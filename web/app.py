@@ -17,26 +17,10 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent.database import get_db
+from agent.utils import clean_content_for_display
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False  # 한글 JSON 응답 지원
-
-
-def clean_summary_for_display(text: str) -> str:
-    """
-    퀴즈 페이지 요약 표시용 정제.
-    - [C1], [C2] 등 RAG 인용 마커 제거
-    - ** 마크다운 볼드 제거
-    """
-    if not text:
-        return ""
-    # [C1], [C2], [C99] 등 인용 마커 제거
-    cleaned = re.sub(r"\s*\[C\d+\]\s*", " ", text)
-    # ** 볼드 마크다운 제거 ( **텍스트** -> 텍스트 )
-    cleaned = re.sub(r"\*\*([^*]+)\*\*", r"\1", cleaned)
-    # 남은 ** 단독 제거
-    cleaned = cleaned.replace("**", "")
-    return " ".join(cleaned.split())  # 연속 공백 정리
 
 
 def extract_quiz_from_content(styled_content: str) -> dict:
@@ -251,7 +235,7 @@ def show_quiz(schedule_id, notification_index):
     }
     persona_for_today = persona_map.get(notification_index, "친근한 친구")
     
-    summary_display = clean_summary_for_display(quiz_data.get('summary', ''))
+    summary_display = clean_content_for_display(quiz_data.get('summary', ''))
 
     return render_template('quiz.html',
         schedule_id=schedule_id,

@@ -575,7 +575,7 @@ def quiz_node(state):
 
         except Exception as e:
             print(f"⚠️ 퀴즈 생성 중 오류: {e}. fallback 퀴즈를 생성합니다.")
-            quiz_obj = _fallback_make_quiz_from_text(summary_text, n=3)
+            quiz_obj = _fallback_quiz(summary_text)
             state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
             state["questions"] = quiz_obj.get("questions", [])
 
@@ -713,7 +713,7 @@ def quiz_improve_node(state):
             state["questions"] = quiz_obj.get("questions", [])
 
         except Exception:
-            quiz_obj = _fallback_make_quiz_from_text(summary_text, n=3)
+            quiz_obj = _fallback_quiz(summary_text)
             state["quiz"] = json.dumps(quiz_obj, ensure_ascii=False)
             state["questions"] = quiz_obj.get("questions", [])
 
