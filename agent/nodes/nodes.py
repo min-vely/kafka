@@ -271,7 +271,7 @@ def extract_content_node(state):
                 "input_text": "Error: 유해 콘텐츠 감지",
                 "is_valid": False,
                 "is_safe": False,
-                "messages": "안전하지 않은 콘텐츠로 판단되어 중단합니다."
+                "messages": "안전하지 않은 콘텐츠(예: 스팸, 광고)로 판단되어 중단합니다."
             }
 
         # 성공적으로 통과한 경우 리턴
