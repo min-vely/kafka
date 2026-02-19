@@ -9,6 +9,8 @@ from datetime import datetime, date
 from typing import List, Dict
 import json
 
+from agent.utils import clean_content_for_display
+
 
 def process_one_from_queue(db):
     """
@@ -211,11 +213,9 @@ def send_notification_for_schedule(schedule: Dict, target_date: str, notificatio
             quiz_url = f"http://localhost:8080/quiz/{schedule_id}/{notification_index}"
             message = f"📝 오늘의 퀴즈가 준비되었습니다!\n\n{notification_index}번째 문제를 풀러 가세요 (클릭하면 자동으로 열립니다)"
         else:
-            # 힐링형: 기존 방식
-            if len(styled_content) > 200:
-                message = styled_content[:197] + "..."
-            else:
-                message = styled_content
+            # 힐링형: [C#], ** 정제 후 표시
+            raw_msg = styled_content[:197] + "..." if len(styled_content) > 200 else styled_content
+            message = clean_content_for_display(raw_msg)
         
         # 팝업 발송 (클릭 시 자동으로 웹페이지 열림)
         send_popup_notification(
