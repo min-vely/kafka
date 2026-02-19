@@ -286,6 +286,9 @@ def submit_quiz(schedule_id, notification_index):
             quiz_data = {'questions': questions_list}
         except json.JSONDecodeError:
             return jsonify({"error": "퀴즈 데이터 파싱 오류"}), 500
+
+    if not quiz_data.get('questions'):
+        return jsonify({"error": "퀴즈를 찾을 수 없습니다"}), 404
     
     # notification_index에 해당하는 문제의 정답 가져오기
     question_index = notification_index - 1
@@ -331,7 +334,7 @@ def submit_quiz(schedule_id, notification_index):
         'user_answer': user_answer,
         'correct_answer': correct_answer,
         'retry_scheduled': retry_scheduled,
-        'question_text': quiz_data['questions'][question_index]['text']
+        'question_text': quiz_data['questions'][question_index].get('text', '')
     })
 
 
