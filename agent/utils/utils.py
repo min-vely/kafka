@@ -162,6 +162,21 @@ def validate_schedule_dates(dates: List[str]) -> tuple:
     return True, validated, None
 
 
+def clean_content_for_display(text: str) -> str:
+    """
+    표시용 콘텐츠 정제.
+    - [C1], [C2], [C99] 등 RAG 인용 마커 제거
+    - ** 마크다운 볼드 제거
+    팝업 알림, 콘솔 출력 등에 사용.
+    """
+    if not text:
+        return ""
+    cleaned = re.sub(r"\s*\[C\d+\]\s*", " ", text)
+    cleaned = re.sub(r"\*\*([^*]+)\*\*", r"\1", cleaned)
+    cleaned = cleaned.replace("**", "")
+    return " ".join(cleaned.split())
+
+
 def extract_json(text: str) -> dict:
     """
     텍스트에서 JSON 블록을 찾아 파싱합니다.

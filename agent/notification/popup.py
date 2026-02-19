@@ -16,6 +16,8 @@ from typing import List, Optional
 from datetime import datetime
 import subprocess
 
+from agent.utils import clean_content_for_display
+
 # 플랫폼 감지
 OS_TYPE = platform.system()
 WINOTIFY_AVAILABLE = False
@@ -232,11 +234,9 @@ def schedule_popup_notifications(
         quiz_url = f"http://localhost:8080/quiz/{schedule_id}/1"
         display_message = f"📝 오늘의 퀴즈가 준비되었습니다!\n\n1번째 문제를 풀러 가세요 (클릭하면 자동으로 열립니다)"
     else:
-        # 힐링형 또는 schedule_id 없을 때: 기존 방식
-        if len(styled_content) > 200:
-            display_message = styled_content[:197] + "..."
-        else:
-            display_message = styled_content
+        # 힐링형 또는 schedule_id 없을 때: [C#], ** 정제 후 표시
+        raw_msg = styled_content[:197] + "..." if len(styled_content) > 200 else styled_content
+        display_message = clean_content_for_display(raw_msg)
     
     send_popup_notification(
         title=title,
