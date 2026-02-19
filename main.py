@@ -1,106 +1,12 @@
 import os
 import argparse
-import json
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from agent.graph import build_graph
-from agent.utils import clean_content_for_display
-#유틸 모두 graph로 이동
-
-def pretty_print(result: dict):
-    #extract_content_node노드 검증
-    final_msg = result.get("messages", "메시지가 없습니다.")
-    is_valid = result.get("is_valid")
-    is_safe = result.get("is_safe")
-
-    print("\n" + "=" * 10 + " 🔍 INPUT VERIFICATION " + "=" * 10)
-    # [1단계] 주소/입력 유효성
-    valid_status = "✅ PASS" if is_valid else "❌ FAIL"
-    print(f"STATUS  : {valid_status}")
-
-    # [2단계] 콘텐츠 안전성 (is_valid가 True일 때만 출력)
-    if is_valid:
-        safe_status = "✅ SAFE" if is_safe else "🚨 UNSAFE"
-        print(f"SAFETY  : {safe_status}")
-    else:
-        print(f"SAFETY  : ➖ SKIP (검증 실패)")
-
-    print(f"MESSAGE : {final_msg}")
-    print("=" * 43)
-
-    print(f"\n========== CATEGORY: {result.get('category', 'N/A')} ==========")
-    
-    print("\n========== SUMMARY ==========")
-    try:
-        s = json.loads(result.get("summary", "{}"))
-        raw = s.get("Summary", s)
-        print(clean_content_for_display(str(raw) if raw else ""))
-    except Exception:
-        print(clean_content_for_display(str(result.get("summary", ""))))
-
-    print("\n========== THOUGHT QUESTIONS ==========")
-    tq = result.get("thought_questions", [])
-    if tq:
-        for i, q in enumerate(tq, 1):
-            print(f"{i}. {q}")
-    else:
-        print("(no thought questions)")
-
-    if result.get("category") == "지식형":
-        print("\n========== QUIZ ==========")
-        try:
-            q = json.loads(result.get("quiz", "{}"))
-            questions = q.get("questions", [])
-            if not questions:
-                print("(no quiz items)")
-            for i, item in enumerate(questions, 1):
-                print(f"\nQ{i}. {item.get('text') or item.get('question')}")
-                for opt in item.get("options", []):
-                    print(f"  {opt}")
-                print("  정답:", item.get("answer"))
-        except Exception:
-            print(result.get("quiz", ""))
-    
-    print("\n========== JUDGE ==========")
-    print("score:", result.get("judge_score"))
-    print("needs_improve:", result.get("needs_improve"))
-    print("improve_count:", result.get("improve_count", 0))
-
-    # 🆕 페르소나 정보 출력
-    print("\n========== PERSONA ==========")
-    print("style:", result.get("persona_style", "N/A"))
-    print("count:", result.get("persona_count", 0))
-    
-    # 🆕 페르소나가 적용된 최종 메시지 출력
-    styled = result.get("styled_content", "")
-    if styled:
-        print("\n========== STYLED CONTENT (페르소나 적용) ==========")
-        print(clean_content_for_display(styled))
-    
-    # 🆕 에빙하우스 스케줄 출력
-    print("\n========== EBBINGHAUS SCHEDULE ==========")
-    schedule_dates = result.get("schedule_dates", [])
-    if schedule_dates:
-        for i, date in enumerate(schedule_dates, 1):
-            print(f"{i}차 알림: {date} 오전 8시 (출근길)")
-    else:
-        print("(no schedule)")
-
-    print("\n========== RAG ==========")
-    print("query:", result.get("query", ""))
-    cits = result.get("citations", [])
-    if cits:
-        print("citations:")
-        for c in cits:
-            cid = c.get("id")
-            txt = (c.get("text") or "").replace("\n"," ")
-            snip = (txt[:140] + "…") if len(txt) > 140 else txt
-            print(f" - {cid}: {snip}")
-    else:
-        print("citations: (none)")
+from agent.utils.pretty_result import pretty_print
 
 
 def main():
@@ -112,7 +18,23 @@ def main():
         action="store_true",
         help="URL을 큐에 넣지 않고 즉시 처리 (기본: URL은 큐에 저장, --process-now면 즉시 처리)"
     )
+    parser.add_argument("--web", action="store_true", help="웹 UI 모드 (8080 포트)")
     args = parser.parse_args()
+
+    # 인자 없이 실행 시 웹 UI 모드 (main.py 또는 main.py --web)
+    if not args.text and not args.url:
+        from web.app import app
+        print("=" * 60)
+        print("🎓 카프카 AI - 웹 UI 모드")
+        print("=" * 60)
+        print()
+        print("📍 URL: http://localhost:8080")
+        print("   → URL 입력 → 즉시 처리 → 퀴즈 풀기")
+        print()
+        print("⚠️  Ctrl+C로 종료")
+        print()
+        app.run(debug=True, host='0.0.0.0', port=8080, use_reloader=False)
+        return
 
     # input_url노드로 값 받기 위한 변수 추가(input_text, source_input)
     input_text = ""
