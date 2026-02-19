@@ -313,6 +313,21 @@ def _make_rag_summary(llm: ChatUpstage, context: str) -> str:
     except Exception:
         return str(resp).strip()
     
+def _clean_summary_meta(text: str) -> str:
+    """
+    요약 본문만 남기고 LLM이 붙인 메타 문구 제거.
+    - 앞: "수정된 3문장 요약:", "3문장 요약:" 등
+    - 뒤: "(※ 최종 요약은 ...)", "(※ 참고: ...)" 등
+    """
+    s = (text or "").strip()
+    # 앞쪽 라벨 제거 (수정된 3문장 요약: / 3문장 요약: 등)
+    s = re.sub(r"^(수정된\s*)?3\s*문장\s*요약\s*:?\s*", "", s, flags=re.IGNORECASE)
+    # ※ 주석 블록 제거 (괄호 안 ※ ... ) 전부
+    s = re.sub(r"\s*\(\s*※[^)]*\)", "", s)
+    s = re.sub(r"\s*※\s*참고:[^\n]*(?:\n|$)", "", s)
+    return s.strip()
+
+
 def _strip_code_fences(s: str) -> str:
     s = (s or "").strip()
     s = re.sub(r"```json\s*", "", s, flags=re.IGNORECASE)
@@ -469,6 +484,7 @@ def verify_summary_with_rag(
 
     # 🔧 수정 사항/주석 블록 제거 (최종 요약만 검증)
     summary_draft = (summary_draft or "").split("※ 수정 사항:")[0].strip()
+    summary_draft = _clean_summary_meta(summary_draft)
 
     # -----------------------------
     # (NEW) A/B: LLM 요약 vs RAG 요약 생성 & 선택
@@ -485,7 +501,7 @@ def verify_summary_with_rag(
         max_context_chars=max_context_chars,
     )
 
-    rag_summary_candidate = _make_rag_summary(llm, global_context)
+    rag_summary_candidate = _clean_summary_meta(_make_rag_summary(llm, global_context))
 
     judge_ab = _judge_pick_best(
         llm=llm,
@@ -608,6 +624,7 @@ def verify_summary_with_rag(
 
     context = "\n\n".join(context_blocks)
     verified_summary = "\n".join(verified_lines).strip()
+    verified_summary = _clean_summary_meta(verified_summary)
 
     return {
         "query": global_query,
