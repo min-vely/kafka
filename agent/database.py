@@ -10,6 +10,7 @@ SQLite 데이터베이스 관리
 - 발송 완료 처리
 """
 
+import os
 import sqlite3
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -34,6 +35,9 @@ class ScheduleDB:
             db_path: DB 파일 경로 (기본: data/kafka.db)
         """
         self.db_path = db_path
+        dir_path = os.path.dirname(db_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Dict처럼 접근 가능
         self._create_tables()
