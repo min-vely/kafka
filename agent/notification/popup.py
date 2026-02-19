@@ -59,7 +59,8 @@ def send_popup_notification(
     message: str, 
     timeout: int = 10,
     url: Optional[str] = None,
-    app_icon: str = None
+    app_icon: str = None,
+    group_id: Optional[str] = None,
 ):
     """
     크로스 플랫폼 클릭 가능한 팝업 알림 발송 (macOS, Windows 모두 지원)
@@ -89,14 +90,17 @@ def send_popup_notification(
         }.get(OS_TYPE, OS_TYPE)
         
         # macOS: pync 사용 (클릭 시 URL 열기)
+        # group_id 미지정 시 기본 그룹이라 여러 알림이 하나로 대체됨 → 고유 group 전달로 각각 표시
         if OS_TYPE == 'Darwin' and PYNC_AVAILABLE and url:
-            pync.notify(
-                message,
+            kwargs = dict(
                 title=title,
                 open=url,  # 클릭 시 이 URL 열기
                 sound='default',  # 알림 소리
                 contentImage=app_icon
             )
+            if group_id is not None:
+                kwargs['group'] = group_id
+            pync.notify(message, **kwargs)
             print(f"✅ [macOS - 클릭 가능] 알림 발송 성공!")
             print(f"   제목: {title}")
             print(f"   클릭 시 열림: {url}")
