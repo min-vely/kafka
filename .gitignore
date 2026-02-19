@@ -218,4 +218,4 @@ __marimo__/
 kafka.db
 data/*.db
 !data/.gitkeep
-data/cache/
+data/cache/test_popup.py
