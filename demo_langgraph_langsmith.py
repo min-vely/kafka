@@ -282,8 +282,9 @@ def read_input_text(args) -> str:
     # Minimal URL support (optional): attempt to reuse your project's extractor if present.
     if args.url:
         try:
-            from agent.utils import get_article_content  # type: ignore
-            return get_article_content(args.url)
+            from agent.tools.get_article_content_tool import get_article_content_tool # type: ignore
+            # 툴을 직접 호출하여 내용을 가져옵니다.
+            return get_article_content_tool.invoke({"url": args.url})
         except Exception:
             # fallback: very simple fetch
             import requests
