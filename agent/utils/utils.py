@@ -69,6 +69,22 @@ def get_youtube_transcript(video_id: str) -> str:
     full_text = " ".join([item.text for item in transcript])
     return full_text
 
+def transform_naver_blog_url(url: str) -> str:
+    """
+    일반 네이버 블로그 주소를 본문 추출이 용이한 PostView 주소로 변환합니다.
+    """
+    # 네이버 블로그 주소 패턴 확인 (m.blog 포함)
+    naver_blog_pattern = r"https?://(?:m\.)?blog\.naver\.com/([\w-]+)/(\d+)"
+    match = re.match(naver_blog_pattern, url)
+
+    if match:
+        blog_id = match.group(1)  # 아이디 추출
+        log_no = match.group(2)  # 글 번호 추출
+        # 본문이 바로 렌더링되는 주소로 재구성
+        return f"https://blog.naver.com/PostView.naver?blogId={blog_id}&logNo={log_no}"
+
+    return url  # 네이버 블로그가 아니면 그대로 반환
+
 # ============================================================
 # 🆕 에빙하우스 망각 곡선 날짜 계산
 # ============================================================
