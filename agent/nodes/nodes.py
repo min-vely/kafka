@@ -997,6 +997,7 @@ def check_cache_node(state: Dict[str, Any]) -> Dict[str, Any]:
     URL 또는 본문을 기준으로 기존 캐시 데이터가 있는지 확인하고,
     있다면 상태에 채워 무거운 노드들을 건너뛸 수 있도록 합니다.
     """
+
     if state.get("skip_cache") is True:
         state["is_cached"] = False
         return state
