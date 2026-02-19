@@ -265,7 +265,8 @@ def submit_quiz(schedule_id, notification_index):
             "retry_scheduled": false
         }
     """
-    user_answer = request.json.get('answer', '')
+    data = request.get_json(silent=True) or {}
+    user_answer = data.get('answer', '')
     
     db = get_db()
     schedule = db.get_schedule_by_id(schedule_id)
