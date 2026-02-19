@@ -63,6 +63,16 @@ def extract_quiz_from_content(styled_content: str) -> dict:
         quiz_json = styled_content[start:end]
         try:
             quiz_data = json.loads(quiz_json)
+
+            # 추가: 여기부터 (이유는 모르겠지만, 네이버 블로그의 경우 styled content에서 [요약]말고 요약으로 불러들어와 읽히지 않은 버그가 있었음.)
+            # 이미 찾은 summary가 없다면, 전체 텍스트에서 "요약": "내용" 패턴을 한 번 더 찾습니다.
+            if not summary:
+                # JSON 키값 형태의 요약 추출 (페르소나용)
+                json_summary_match = re.search(r'"요약":\s*"([^"]*)"', styled_content)
+                if json_summary_match:
+                    summary = json_summary_match.group(1)
+            # 여기까지 추가
+
             return {
                 "summary": summary,
                 "questions": quiz_data.get("questions", [])
@@ -76,7 +86,7 @@ def extract_quiz_from_content(styled_content: str) -> dict:
     # Q1, Q2... 형식으로 질문 찾기
     question_pattern = r'Q(\d+)\.\s*(.*?)(?=Q\d+\.|정답:|$)'
     matches = re.findall(question_pattern, styled_content, re.DOTALL)
-    
+
     for num, q_text in matches:
         # 옵션 추출 (A), B), C), D) 형식)
         options = re.findall(r'([A-D]\).*?)(?=[A-D]\)|정답:|Q\d+\.|$)', q_text, re.DOTALL)
@@ -118,6 +128,7 @@ def index():
 def process_url():
     """URL 또는 텍스트를 즉시 처리하고 퀴즈 페이지로 이동"""
     url_or_text = (request.form.get('url') or request.form.get('url_or_text') or '').strip()
+
     if not url_or_text:
         return redirect(url_for('index', alert='URL 또는 텍스트를 입력해주세요.', alert_type='error'))
 
@@ -126,6 +137,8 @@ def process_url():
 
     try:
         import sys
+        import importlib
+
         print("\n" + "=" * 50, flush=True)
         print("⚡ [웹] 즉시 처리 시작...", flush=True)
         print("=" * 50, flush=True)
