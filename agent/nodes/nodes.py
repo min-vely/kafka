@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 from langchain_upstage import ChatUpstage
 from agent.tools.get_latest_update_analysis import get_latest_update_analysis
+from agent.tools.get_article_content_tool import get_article_content_tool
 
 from agent.prompts import (
     SAFETY_PROMPT, #extract_content 노드에서 콘텐츠 안전도 검사하는 프롬프트 추가
@@ -29,7 +30,6 @@ from agent.utils import (
     is_youtube_url,
     extract_youtube_video_id,
     get_youtube_transcript,
-    get_article_content,
     calculate_ebbinghaus_dates,
     validate_schedule_dates,
     extract_json
@@ -214,7 +214,31 @@ def extract_content_node(state):
                 video_id = extract_youtube_video_id(url)
                 content = get_youtube_transcript(video_id)
             else:
-                content = get_article_content(url)
+                # 🔵 [변경] 노드에서 직접 호출 대신 도구 호출(Tool-calling) 방식 사용
+                llm_with_tools = llm.bind_tools([get_article_content_tool])
+                print(f"🌐 [Tool-calling] Jina Reader를 사용하여 본문 추출 시도: {url}")
+                
+                tool_resp = llm_with_tools.invoke([
+                    ("system", "당신은 웹 콘텐츠 추출 전문가입니다. 주어진 URL에서 본문을 추출하기 위해 도구를 사용하세요."),
+                    ("human", f"이 URL의 내용을 추출해줘: {url}")
+                ])
+                
+                if tool_resp.tool_calls:
+                    for tool_call in tool_resp.tool_calls:
+                        if tool_call["name"] == "get_article_content_tool":
+                            content = get_article_content_tool.invoke(tool_call["args"])
+                            print("✅ 도구 호출을 통해 본문 추출 완료.")
+                            break
+                
+                # 도구 호출이 전혀 수행되지 않았거나 실패한 경우 처리
+                if not content or content.startswith("Error:"):
+                    error_msg = content.replace("Error: ", "") if content else "본문을 추출할 수 없습니다. LLM이 도구 호출을 수행하지 않았습니다."
+                    return {
+                        "input_text": f"Error: {error_msg}",
+                        "is_valid": False,
+                        "messages": "콘텐츠 추출 실패"
+                    }
+
         except Exception as e:
             return {
                 "input_text": f"Error: {str(e)}",
