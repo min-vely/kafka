@@ -109,7 +109,25 @@ def _safe_parse_quiz(raw: str) -> Optional[Dict[str, Any]]:
 def _fallback_quiz(summary: str) -> Dict[str, Any]:
     text = re.sub(r"\s+", " ", (summary or "").strip())
     if not text:
-        return {"questions": []}
+        # 요약이 비어도 기본 5문항 반환 (웹 퀴즈 페이지 에러 방지)
+        letters = ["A", "B", "C", "D"]
+        placeholders = [
+            "위 콘텐츠의 핵심 내용을 다시 한번 확인해보세요.",
+            "다음 복습에서 더 나은 퀴즈가 제공됩니다.",
+            "에빙하우스 망각 곡선에 따라 복습해보세요.",
+            "콘텐츠를 꼼꼼히 읽어보시는 것을 권장합니다.",
+            "오늘 학습 내용을 정리해보세요.",
+        ]
+        return {
+            "questions": [
+                {
+                    "text": p,
+                    "options": [f"{letters[j]}) 내용 확인" for j in range(4)],
+                    "answer": "A"
+                }
+                for p in placeholders
+            ]
+        }
 
     words = re.findall(r"[가-힣A-Za-z]{3,}", text)
     words = list(dict.fromkeys(words))[:20]
@@ -240,10 +258,11 @@ def extract_content_node(state):
                     }
 
         except Exception as e:
+            err_msg = str(e)
             return {
-                "input_text": f"Error: {str(e)}",
+                "input_text": f"Error: {err_msg}",
                 "is_valid": False,
-                "messages": "콘텐츠 추출 중 오류가 발생했습니다."
+                "messages": f"콘텐츠 추출 중 오류: {err_msg}"
             }
 
     # 3. 추출된 내용이 아예 없거나 너무 짧은 경우 (요약 불가 URL)
@@ -978,6 +997,10 @@ def check_cache_node(state: Dict[str, Any]) -> Dict[str, Any]:
     URL 또는 본문을 기준으로 기존 캐시 데이터가 있는지 확인하고,
     있다면 상태에 채워 무거운 노드들을 건너뛸 수 있도록 합니다.
     """
+    if state.get("skip_cache") is True:
+        state["is_cached"] = False
+        return state
+
     url = state.get("url")
     text = state.get("input_text")
     

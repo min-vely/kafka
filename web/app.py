@@ -47,13 +47,21 @@ def extract_quiz_from_content(styled_content: str) -> dict:
     summary_match = re.search(r'\[요약\](.*?)(?:\[퀴즈\]|$)', styled_content, re.DOTALL)
     summary = summary_match.group(1).strip() if summary_match else ""
     
-    # 퀴즈 JSON 추출 시도
-    quiz_json_match = re.search(r'\{"questions":\s*\[(.*?)\]\}', styled_content, re.DOTALL)
-    
-    if quiz_json_match:
+    # 퀴즈 JSON 추출 시도 (중첩 괄호 처리)
+    start = styled_content.find('{"questions"')
+    if start != -1:
+        depth, i, end = 0, start, start
+        for i in range(start, len(styled_content)):
+            c = styled_content[i]
+            if c == '[' or c == '{':
+                depth += 1
+            elif c == ']' or c == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        quiz_json = styled_content[start:end]
         try:
-            # JSON 파싱
-            quiz_json = '{"questions": [' + quiz_json_match.group(1) + ']}'
             quiz_data = json.loads(quiz_json)
             return {
                 "summary": summary,
@@ -94,40 +102,112 @@ def extract_quiz_from_content(styled_content: str) -> dict:
     }
 
 
-@app.route('/')
+@app.route('/', methods=['GET'])
 def index():
-    """홈 페이지"""
-    return """
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>카프카 퀴즈</title>
-        <style>
-            body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                max-width: 600px;
-                margin: 50px auto;
-                padding: 20px;
-                text-align: center;
-            }
-            h1 { color: #2c3e50; }
-            p { color: #7f8c8d; line-height: 1.6; }
-            .info { background: #ecf0f1; padding: 20px; border-radius: 8px; margin-top: 20px; }
-        </style>
-    </head>
-    <body>
-        <h1>🎓 카프카 퀴즈 시스템</h1>
-        <p>팝업 알림에서 퀴즈 링크를 클릭하면 여기로 이동합니다.</p>
-        <div class="info">
-            <p><strong>📌 사용 방법</strong></p>
-            <p>1. main.py로 콘텐츠 추가 (지식형)</p>
-            <p>2. 스케줄러로 알림 발송</p>
-            <p>3. 알림 클릭 → 퀴즈 페이지</p>
-            <p>4. 퀴즈 풀기 → 제출</p>
-        </div>
-    </body>
-    </html>
-    """
+    """홈 페이지 - URL 입력 및 대기열 현황"""
+    db = get_db()
+    pending_count = db.get_pending_queue_count()
+    alert = request.args.get('alert')
+    alert_type = request.args.get('alert_type', 'info')
+    if alert:
+        alert = {'message': alert, 'type': alert_type}
+    return render_template('index.html', pending_count=pending_count, alert=alert)
+
+
+@app.route('/process', methods=['POST'])
+def process_url():
+    """URL 또는 텍스트를 즉시 처리하고 퀴즈 페이지로 이동"""
+    url_or_text = (request.form.get('url') or request.form.get('url_or_text') or '').strip()
+    if not url_or_text:
+        return redirect(url_for('index', alert='URL 또는 텍스트를 입력해주세요.', alert_type='error'))
+
+    if not os.getenv("UPSTAGE_API_KEY"):
+        return redirect(url_for('index', alert='UPSTAGE_API_KEY 환경 변수가 설정되지 않았습니다.', alert_type='error'))
+
+    try:
+        import sys
+        print("\n" + "=" * 50, flush=True)
+        print("⚡ [웹] 즉시 처리 시작...", flush=True)
+        print("=" * 50, flush=True)
+        sys.stdout.flush()
+
+        from agent.graph import build_graph
+        graph = build_graph()
+        initial_state = {
+            "user_input": url_or_text,
+            "input_text": "",
+            "max_improve": 3,
+            "skip_cache": True,  # 웹 즉시처리 시 캐시 건너뛰기 (항상 새로 분석)
+        }
+        result = graph.invoke(initial_state)
+
+        # 터미널에 상세 출력 (main.py와 동일)
+        from agent.utils.pretty_result import pretty_print
+        pretty_print(result)
+
+        print("\n✅ [웹] 처리 완료", flush=True)
+        sys.stdout.flush()
+    except Exception as e:
+        return redirect(url_for('index', alert=f'처리 중 오류가 발생했습니다: {str(e)}', alert_type='error'))
+
+    if result.get("is_valid") is False:
+        msg = result.get("messages", "입력값이 유효하지 않습니다.")
+        return redirect(url_for('index', alert=msg, alert_type='error'))
+
+    if result.get("is_safe") is False:
+        return redirect(url_for('index', alert='콘텐츠 안전 검사에 통과하지 못했습니다.', alert_type='error'))
+
+    schedule_id = result.get("schedule_id")
+    category = result.get("category", "지식형")
+
+    # 퀴즈 추출: 1) result.quiz → 2) result.questions → 3) DB → 4) styled_content
+    questions = result.get("questions") or []
+    if not questions and result.get("quiz"):
+        try:
+            qj = json.loads(result["quiz"])
+            questions = qj.get("questions", []) if isinstance(qj, dict) else []
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if not questions and schedule_id:
+        schedule = get_db().get_schedule_by_id(schedule_id)
+        if schedule:
+            qj = schedule.get("questions")
+            if qj:
+                try:
+                    questions = json.loads(qj) if isinstance(qj, str) else (qj or [])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if not questions:
+                quiz_data = extract_quiz_from_content(schedule.get("styled_content", ""))
+                questions = quiz_data.get("questions", [])
+    if not questions and result.get("styled_content"):
+        quiz_data = extract_quiz_from_content(result["styled_content"])
+        questions = quiz_data.get("questions", [])
+
+    if category == "지식형" and schedule_id and len(questions) > 0:
+        return redirect(url_for('show_quiz', schedule_id=schedule_id, notification_index=1))
+
+    if category == "지식형" and schedule_id and len(questions) == 0:
+        return redirect(url_for('index', alert='퀴즈 생성에 실패했습니다. 요약이 비어있거나 형식 변환에 실패한 것 같습니다. 다시 시도해주세요.', alert_type='error'))
+
+    if category != "지식형":
+        return redirect(url_for('index', alert='힐링형 콘텐츠입니다. 퀴즈는 생성되지 않으며, 알림을 통해 생각 유도 질문을 확인할 수 있습니다.', alert_type='info'))
+
+    return redirect(url_for('index', alert='퀴즈 생성에 실패했습니다. 다시 시도해주세요.', alert_type='error'))
+
+
+@app.route('/add-url', methods=['POST'])
+def add_url():
+    """URL을 대기열에 추가"""
+    url_or_text = (request.form.get('url') or '').strip()
+    if not url_or_text:
+        return redirect(url_for('index', alert='URL 또는 텍스트를 입력해주세요.', alert_type='error'))
+
+    db = get_db()
+    input_type = 'url' if url_or_text.startswith(('http://', 'https://')) else 'text'
+    db.add_to_url_queue(url_or_text, user_id="default_user", input_type=input_type)
+    pending = db.get_pending_queue_count()
+    return redirect(url_for('index', alert=f'대기열에 추가되었습니다. (대기 중: {pending}개)', alert_type='success'))
 
 
 @app.route('/quiz/<int:schedule_id>/<int:notification_index>')
