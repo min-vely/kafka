@@ -64,7 +64,7 @@ def extract_quiz_from_content(styled_content: str) -> dict:
         try:
             quiz_data = json.loads(quiz_json)
 
-            # 추가: 여기부터 (이유는 모르겠지만, 네이버 블로그의 경우 styled content에서 [요약]말고 요약으로 불러들어와 읽히지 않은 버그가 있었음.)
+            # 추가: 이유는 모르겠지만, 네이버 블로그의 경우 styled content에서 [요약]말고 요약으로 불러들어와 읽히지 않은 버그가 있었음.
             # 이미 찾은 summary가 없다면, 전체 텍스트에서 "요약": "내용" 패턴을 한 번 더 찾습니다.
             if not summary:
                 # JSON 키값 형태의 요약 추출 (페르소나용)
@@ -137,8 +137,6 @@ def process_url():
 
     try:
         import sys
-        import importlib
-
         print("\n" + "=" * 50, flush=True)
         print("⚡ [웹] 즉시 처리 시작...", flush=True)
         print("=" * 50, flush=True)
