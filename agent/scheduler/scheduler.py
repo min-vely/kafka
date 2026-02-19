@@ -27,16 +27,18 @@ class KafkaScheduler:
     - 사용자가 수동으로 실행하지 않아도 자동으로 알림 발송
     """
     
-    def __init__(self, test_mode: bool = False, interval_seconds: int = None):
+    def __init__(self, test_mode: bool = False, interval_seconds: int = None, test_multi: bool = False):
         """
         스케줄러 초기화
         
         Args:
             test_mode: 테스트 모드 (즉시 실행)
             interval_seconds: 실행 간격 (초 단위, 디버깅용)
+            test_multi: 여러 개 알림 테스트 모드 (test_multi_user 스케줄 발송 이력 무시)
         """
         self.scheduler = BackgroundScheduler()
         self.test_mode = test_mode
+        self.test_multi = test_multi
         self.interval_seconds = interval_seconds
         self.is_running = False
         
@@ -55,8 +57,9 @@ class KafkaScheduler:
         from .jobs import send_daily_notifications
         
         if self.test_mode:
-            print("🧪 테스트 모드: 즉시 알림 발송 실행\n")
-            send_daily_notifications()
+            mode_msg = "여러 개 알림 반복 테스트" if self.test_multi else "즉시 알림 발송"
+            print(f"🧪 테스트 모드: {mode_msg}\n")
+            send_daily_notifications(test_multi=self.test_multi)
             return
         
         if self.interval_seconds:
@@ -145,8 +148,9 @@ class KafkaScheduler:
         """
         from .jobs import send_daily_notifications
         
-        print("🧪 즉시 실행 모드\n")
-        send_daily_notifications()
+        mode_msg = "여러 개 알림 반복 테스트" if self.test_multi else "즉시 실행"
+        print(f"🧪 {mode_msg} 모드\n")
+        send_daily_notifications(test_multi=self.test_multi)
     
     def get_status(self):
         """
@@ -172,7 +176,7 @@ class KafkaScheduler:
 
 
 # 편의 함수
-def start_scheduler(daemon: bool = True, test: bool = False, interval: int = None):
+def start_scheduler(daemon: bool = True, test: bool = False, interval: int = None, test_multi: bool = False):
     """
     스케줄러를 간단하게 시작하는 헬퍼 함수
     
@@ -180,6 +184,7 @@ def start_scheduler(daemon: bool = True, test: bool = False, interval: int = Non
         daemon: 데몬 모드 (영구 실행)
         test: 테스트 모드 (즉시 1회 실행)
         interval: 실행 간격 (초, 디버깅용)
+        test_multi: 여러 개 알림 테스트 (test_multi_user 스케줄 발송 이력 무시)
     
     Example:
         # 프로덕션 모드
@@ -188,12 +193,16 @@ def start_scheduler(daemon: bool = True, test: bool = False, interval: int = Non
         # 테스트 모드
         start_scheduler(test=True)
         
+        # 여러 개 알림 반복 테스트
+        start_scheduler(test=True, test_multi=True)
+        
         # 디버깅 모드 (1분마다)
         start_scheduler(daemon=True, interval=60)
     """
     scheduler = KafkaScheduler(
         test_mode=test,
-        interval_seconds=interval
+        interval_seconds=interval,
+        test_multi=test_multi
     )
     
     if test:
