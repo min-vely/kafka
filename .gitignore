@@ -215,6 +215,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 # Kafka Database
+kafka.db
 data/*.db
 !data/.gitkeep
 data/cache/
