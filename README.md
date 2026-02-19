@@ -144,11 +144,15 @@ python3 scripts/evaluate_classify_accuracy.py
 # 1. 오늘 날짜에 해당하는 스케줄 3개 삽입
 python3 scripts/seed_multiple_notifications_test.py
 
-# 2. 여러 개 알림 테스트 (반복 가능)
+# 2. 스케줄러 테스트 실행 → 알림 3개 연달아 표시
+python3 -m agent.scheduler.scheduler_service --test
+
+# 2-1. 여러 개 알림 테스트 (반복 가능)
 python3 -m agent.scheduler.scheduler_service --test-multi
 # → 알림 3개 연달아 표시, 여러 번 실행해도 매번 재발송
 
 # 일반 테스트 (한 번 보낸 알림은 스킵)
+
 python3 -m agent.scheduler.scheduler_service --test
 ```
 

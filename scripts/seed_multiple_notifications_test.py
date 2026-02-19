@@ -3,17 +3,13 @@
 여러 개 알림 테스트용 가상 스케줄 데이터 삽입
 
 오늘 날짜에 해당하는 스케줄을 3개 추가하여,
-스케줄러 --test-multi 실행 시 알림이 여러 개 연달아 뜨는 상황을 시뮬레이션합니다.
+스케줄러 --test 실행 시 알림이 여러 개 연달아 뜨는 상황을 시뮬레이션합니다.
 
 사용법:
     python3 scripts/seed_multiple_notifications_test.py
 
-실행 후 (여러 번 반복 테스트 가능):
-    python3 -m agent.scheduler.scheduler_service --test-multi
-
-참고:
-    --test: 일반 테스트 (한 번 보낸 알림은 스킵)
-    --test-multi: 여러 개 알림 반복 테스트 (test_multi_user 스케줄은 매번 재발송)
+실행 후:
+    python3 -m agent.scheduler.scheduler_service --test
 """
 
 import os
@@ -64,12 +60,6 @@ def main():
             "summary": "파이썬 기초. 변수, 함수, 클래스 개념.",
             "url": "https://example.com/python",
         },
-        {
-            "styled_content": "4차 복습 알림이다. 꾸준히 복습하는 게 핵심이야.",
-            "persona_style": "엄격한 교수",
-            "summary": "장기 기억 전환. 에빙하우스 복습 완료.",
-            "url": "https://example.com/review",
-        },
     ]
 
     print("=" * 60)
@@ -98,9 +88,9 @@ def main():
     print("\n" + "-" * 60)
     print("✅ 가상 데이터 삽입 완료!")
     print("-" * 60)
-    print("\n📌 다음 명령으로 여러 개 알림 테스트 (반복 가능):")
-    print("   python3 -m agent.scheduler.scheduler_service --test-multi")
-    print("\n   → 알림 4개가 2초 간격으로 연달아 나타나며, 여러 번 실행해도 매번 재발송됩니다.")
+    print("\n📌 다음 명령으로 여러 개 알림 테스트:")
+    print("   python3 -m agent.scheduler.scheduler_service --test")
+    print("\n   → 알림이 3개 연달아 나타납니다.")
     print("=" * 60 + "\n")
 
 
