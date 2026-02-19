@@ -34,6 +34,7 @@ from agent.utils import (
     validate_schedule_dates,
     extract_json
 )
+from agent.utils.cache import load_cache, save_cache
 from agent.rag import verify_summary_with_rag
 from agent.database import get_db
 
@@ -945,4 +946,64 @@ def schedule_node(state):
         print("\n🔔 [Windows] 알림이 화면에 나타날 때까지 기다리는 중입니다...")
         print("   (알림이 뜨지 않는다면 엔터를 눌러 진행하세요)")
 
+    return state
+
+
+def check_cache_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    URL 또는 본문을 기준으로 기존 캐시 데이터가 있는지 확인하고,
+    있다면 상태에 채워 무거운 노드들을 건너뛸 수 있도록 합니다.
+    """
+    url = state.get("url")
+    text = state.get("input_text")
+    
+    if not url and not text:
+        return state
+    
+    cached_data = load_cache(url, text)
+    if cached_data:
+        print(f"\n✨ [Cache] 기존 분석 결과를 발견했습니다! ('{url if url else '텍스트 입력'[:20]}...')")
+        
+        # 퀴즈 데이터 복원
+        quiz_raw = cached_data.get("quiz")
+        questions = []
+        if quiz_raw:
+            try:
+                if isinstance(quiz_raw, str):
+                    quiz_obj = json.loads(quiz_raw)
+                else:
+                    quiz_obj = quiz_raw
+                questions = quiz_obj.get("questions", [])
+            except:
+                pass
+
+        # 캐시된 데이터로 상태 업데이트
+        state.update({
+            "category": cached_data.get("category"),
+            "saved_summary": cached_data.get("saved_summary"),
+            "summary": cached_data.get("summary"),
+            "quiz": quiz_raw,
+            "questions": questions,
+            "thought_questions": cached_data.get("thought_questions"),
+            "augmentation_info": cached_data.get("augmentation_info"),
+            "context": cached_data.get("context"),
+            "citations": cached_data.get("citations"),
+            "styled_content": cached_data.get("styled_content"),
+            "persona_style": cached_data.get("persona_style"),
+            "is_cached": True
+        })
+    else:
+        state["is_cached"] = False
+        
+    return state
+
+
+def save_cache_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """모든 프로세스가 완료된 후 분석 결과를 캐시에 저장합니다."""
+    # 이미 캐시를 사용한 경우 중복 저장하지 않음
+    if state.get("is_cached"):
+        return state
+        
+    if save_cache(state):
+        print("💾 [Cache] 분석 결과 캐시 저장 완료")
     return state
