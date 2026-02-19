@@ -16,6 +16,8 @@ from agent.nodes import (
     persona_node,
     persona_safety_check_node,  # 페르소나 후 안전 검사
     schedule_node,
+    check_cache_node,
+    save_cache_node,
 )
 
 
@@ -24,6 +26,7 @@ def build_graph():
     # 기획서상 1, 2번 노드 등록
     g.add_node("input_url", input_url_node)
     g.add_node("extract_content", extract_content_node)
+    g.add_node("check_cache", check_cache_node)
     g.add_node("classify", classify_node)
     g.add_node("synthesize", synthesize_node)
     g.add_node("verify", verify_node)
@@ -36,6 +39,7 @@ def build_graph():
     g.add_node("quiz_improve", quiz_improve_node) # 🆕 추가
     g.add_node("persona", persona_node)
     g.add_node("persona_safety_check", persona_safety_check_node)  # 페르소나 후 안전 검사
+    g.add_node("save_cache", save_cache_node)
     g.add_node("schedule", schedule_node)
 
     # (그래프 시작 수정)
@@ -77,8 +81,23 @@ def build_graph():
         route_after_extract,
         {
             "INVALID": END,  # 추출 실패 / 요약 불가 콘텐츠
-            "SAFE": "classify",
+            "SAFE": "check_cache",
             "UNSAFE": END
+        }
+    )
+
+    def route_after_check_cache(state: AgentState):
+        """캐시가 있으면 바로 schedule로, 없으면 classify로"""
+        if state.get("is_cached"):
+            return "cached"
+        return "not_cached"
+
+    g.add_conditional_edges(
+        "check_cache",
+        route_after_check_cache,
+        {
+            "cached": "schedule",
+            "not_cached": "classify"
         }
     )
 
@@ -129,7 +148,8 @@ def build_graph():
     g.add_edge("quiz_improve", "quiz_judge")
 
     g.add_edge("persona", "persona_safety_check")  # 페르소나 후 안전 검사
-    g.add_edge("persona_safety_check", "schedule")
+    g.add_edge("persona_safety_check", "save_cache")
+    g.add_edge("save_cache", "schedule")
     g.add_edge("schedule", END)
 
     return g.compile()

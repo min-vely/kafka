@@ -9,6 +9,7 @@ class AgentState(TypedDict, total=False):
     is_valid: bool  # input_url_node에서 URL 검증(False일 경우 서비스 중단)
     messages: str  # 사용자에게 URL 또는 text 검증 후 피드백(예: 유효하지 않은 URL, 요약 시작 메시지 전송)
     is_safe: bool  # extract_content_node에서 콘텐츠 안정성 여부 피드백(False일 경우 서비스 중단)
+    is_cached: bool  # 캐시 데이터 사용 여부
 
     # classification
     category: str  # "지식형" or "일반형"
