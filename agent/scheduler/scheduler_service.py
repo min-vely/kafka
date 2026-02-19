@@ -37,6 +37,10 @@ def main():
   테스트 모드 (즉시 실행):
     $ python3 scheduler_service.py --test
   
+  여러 개 알림 반복 테스트 (seed 후 --test-multi):
+    $ python3 scripts/seed_multiple_notifications_test.py
+    $ python3 -m agent.scheduler.scheduler_service --test-multi
+  
   디버깅 모드 (1분마다):
     $ python3 scheduler_service.py --interval 60
   
@@ -49,6 +53,12 @@ def main():
         '--test',
         action='store_true',
         help='테스트 모드 (즉시 1회 실행)'
+    )
+
+    parser.add_argument(
+        '--test-multi',
+        action='store_true',
+        help='여러 개 알림 테스트 모드 (test_multi_user 스케줄은 발송 이력 무시, 반복 테스트 가능)'
     )
     
     parser.add_argument(
@@ -89,9 +99,9 @@ def main():
     print()
     
     try:
-        if args.test:
-            # 테스트 모드
-            start_scheduler(test=True)
+        if args.test or args.test_multi:
+            # 테스트 모드 (--test-multi: 여러 개 알림 반복 테스트용)
+            start_scheduler(test=True, test_multi=args.test_multi)
         elif args.interval:
             # 디버깅 모드
             start_scheduler(daemon=True, interval=args.interval)

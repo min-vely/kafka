@@ -8,6 +8,7 @@
 from datetime import datetime, date
 from typing import List, Dict
 import json
+import time
 
 from agent.utils import clean_content_for_display
 
@@ -56,9 +57,12 @@ def process_one_from_queue(db):
         traceback.print_exc()
 
 
-def send_daily_notifications():
+def send_daily_notifications(test_multi: bool = False):
     """
-    매일 오전 8시에 실행되는 메인 작업 
+    매일 오전 8시에 실행되는 메인 작업
+    
+    Args:
+        test_multi: 여러 개 알림 테스트 모드 (test_multi_user 스케줄은 발송 이력 무시)
     
     동작:
     1. URL 대기열에서 1개 꺼내 처리 (매일 1개씩)
@@ -106,10 +110,13 @@ def send_daily_notifications():
         success_count = 0
         fail_count = 0
         
-        # 정규 스케줄 발송
-        for schedule in schedules:
+        # 정규 스케줄 발송 (여러 개일 때 순차 표시를 위해 test_multi에서 간격 추가)
+        for i, schedule in enumerate(schedules):
             try:
-                send_notification_for_schedule(schedule, today)
+                if test_multi and i > 0:
+                    # 이전 알림이 화면에 잘 보이도록 2초 간격
+                    time.sleep(2)
+                send_notification_for_schedule(schedule, today, test_multi=test_multi)
                 success_count += 1
             except Exception as e:
                 print(f"❌ 스케줄 {schedule['id']} 발송 실패: {e}")
@@ -138,7 +145,7 @@ def send_daily_notifications():
         traceback.print_exc()
 
 
-def send_notification_for_schedule(schedule: Dict, target_date: str, notification_index: int = None):
+def send_notification_for_schedule(schedule: Dict, target_date: str, notification_index: int = None, test_multi: bool = False):
     """
     특정 스케줄에 대해 알림 발송
     
@@ -146,6 +153,7 @@ def send_notification_for_schedule(schedule: Dict, target_date: str, notificatio
         schedule: 스케줄 정보 딕셔너리
         target_date: 발송 대상 날짜 (YYYY-MM-DD)
         notification_index: 알림 차수 (재발송 시 직접 지정, 선택)
+        test_multi: test_multi_user 스케줄이면 발송 이력 무시 (여러 개 알림 반복 테스트용)
     
     동작:
     1. schedule_dates에서 몇 번째 알림인지 확인
@@ -181,8 +189,9 @@ def send_notification_for_schedule(schedule: Dict, target_date: str, notificatio
     
     db = get_db()
     
-    # 중복 발송 방지
-    if is_already_sent(db, schedule_id, notification_index):
+    # 중복 발송 방지 (test_multi_user + test_multi 모드에서는 스킵 안 함)
+    skip_sent_check = test_multi and schedule.get("user_id") == "test_multi_user"
+    if not skip_sent_check and is_already_sent(db, schedule_id, notification_index):
         print(f"⏭️  스케줄 {schedule_id}: {notification_index}차 알림 이미 발송됨 (스킵)")
         return
     
@@ -218,11 +227,14 @@ def send_notification_for_schedule(schedule: Dict, target_date: str, notificatio
             message = clean_content_for_display(raw_msg)
         
         # 팝업 발송 (클릭 시 자동으로 웹페이지 열림)
+        # group_id: macOS에서 같은 group이면 알림이 대체됨 → 고유 ID로 각각 표시
+        group_id = f"kafka-{schedule_id}-{notification_index}"
         send_popup_notification(
             title=title,
             message=message,
             timeout=30,  # 30초 표시
-            url=quiz_url  # 정보형일 때만 URL 전달
+            url=quiz_url,  # 정보형일 때만 URL 전달
+            group_id=group_id,
         )
         
         # 발송 성공 로그
@@ -235,10 +247,13 @@ def send_notification_for_schedule(schedule: Dict, target_date: str, notificatio
         
         print(f"✅ 스케줄 {schedule_id}: {notification_index}차 알림 발송 완료")
         
-        # 마지막 알림이면 완료 처리
+        # 마지막 알림이면 완료 처리 (test_multi_user + test_multi 모드에서는 유지하여 반복 테스트 가능)
         if notification_index == len(schedule_dates):
-            db.mark_as_completed(schedule_id)
-            print(f"🎉 스케줄 {schedule_id}: 모든 알림 발송 완료 (상태: completed)")
+            if skip_sent_check:
+                print(f"🔄 스케줄 {schedule_id}: 테스트 모드라 상태 유지 (다음 --test-multi 실행 시 재발송 가능)")
+            else:
+                db.mark_as_completed(schedule_id)
+                print(f"🎉 스케줄 {schedule_id}: 모든 알림 발송 완료 (상태: completed)")
         
     except Exception as e:
         # 발송 실패 로그
