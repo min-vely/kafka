@@ -131,6 +131,15 @@ python3 scripts/evaluate_classify_accuracy.py
 # --fixture tests/fixtures/classify_samples.json (기본값)
 ```
 
+### 여러 개 알림 테스트 (가상 데이터)
+```bash
+# 1. 오늘 날짜에 해당하는 스케줄 3개 삽입
+python3 scripts/seed_multiple_notifications_test.py
+
+# 2. 스케줄러 테스트 실행 → 알림 3개 연달아 표시
+python3 -m agent.scheduler.scheduler_service --test
+```
+
 ## 📚 문서
 
 - [데이터베이스 가이드](docs/DATABASE_GUIDE.md)
