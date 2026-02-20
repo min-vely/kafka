@@ -5,49 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>카프카 AI - 에빙하우스 복습 퀴즈</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <style>
-        .input-section { margin-bottom: 30px; }
-        .input-section input { 
-            width: 100%; 
-            padding: 14px 18px; 
-            font-size: 1rem; 
-            border: 2px solid #e0e0e0; 
-            border-radius: 10px;
-            margin-bottom: 12px;
-        }
-        .input-section input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        .btn-group { display: flex; gap: 12px; flex-wrap: wrap; }
-        .btn {
-            flex: 1;
-            min-width: 140px;
-            padding: 14px 24px;
-            font-size: 1rem;
-            font-weight: 600;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: transform 0.15s, box-shadow 0.15s;
-        }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-        .btn-secondary { background: #f0f0f0; color: #333; }
-        .queue-info {
-            background: #f8f9fa;
-            padding: 16px 20px;
-            border-radius: 10px;
-            margin-top: 24px;
-            font-size: 0.95rem;
-            color: #555;
-        }
-        .queue-info strong { color: #2c3e50; }
-        .alert { padding: 14px 18px; border-radius: 8px; margin-bottom: 16px; }
-        .alert-error { background: #fee; color: #c00; border-left: 4px solid #c00; }
-        .alert-success { background: #efe; color: #070; border-left: 4px solid #070; }
-        .alert-info { background: #e8f4fd; color: #056; border-left: 4px solid #056; }
-    </style>
 </head>
 <body>
     <div class="container">
@@ -61,7 +18,7 @@
         {% endif %}
 
         <div class="input-section">
-            <label for="url" style="display:block; margin-bottom:8px; font-weight:600; color:#333;">URL 또는 텍스트 입력</label>
+            <label for="url">URL 또는 텍스트 입력</label>
             <input type="text" id="url" name="url" placeholder="https://example.com/article 또는 유튜브 URL 또는 직접 입력할 텍스트" autocomplete="off">
             <div class="btn-group">
                 <button type="button" class="btn btn-primary" onclick="processNow()">⚡ 즉시 처리 (바로 퀴즈)</button>
@@ -74,7 +31,7 @@
             <br><small>스케줄러가 매일 1개씩 처리합니다. (python -m agent.scheduler.scheduler_service)</small>
         </div>
 
-        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #888; font-size: 0.9rem;">
+        <div class="footer-helper">
             <p>지원 형식: 뉴스 기사 URL, 유튜브 URL, 직접 입력 텍스트</p>
             <p>지식형 콘텐츠 → 5문항 퀴즈 생성 | 힐링형 콘텐츠 → 생각 유도 질문</p>
         </div>
