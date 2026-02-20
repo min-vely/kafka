@@ -1,5 +1,7 @@
 import os
+import sys
 import argparse
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -14,12 +16,41 @@ def main():
     parser.add_argument("--text", type=str, help="Input text")
     parser.add_argument("--url", type=str, help="YouTube URL or News Article URL")
     parser.add_argument(
+        "--evaluate-classify",
+        action="store_true",
+        help="분류 정확도 평가 실행 (fixture 기반, 터미널에 결과 출력)",
+    )
+    parser.add_argument(
         "--process-now",
         action="store_true",
         help="URL을 큐에 넣지 않고 즉시 처리 (기본: URL은 큐에 저장, --process-now면 즉시 처리)"
     )
     parser.add_argument("--web", action="store_true", help="웹 UI 모드 (8080 포트)")
+    parser.add_argument(
+        "--fixture",
+        type=str,
+        default="",
+        help="[--evaluate-classify 시] 샘플 JSON 경로 (미지정 시 기본 fixture 사용)",
+    )
+    parser.add_argument(
+        "--show-classify-accuracy",
+        action="store_true",
+        help="URL/텍스트 처리 시, 맨 처음에 분류 정확도 평가 결과를 먼저 출력 (처리 전에 함께 확인)",
+    )
     args = parser.parse_args()
+
+    # 분류 정확도 평가 모드 (추가 기능)
+    if args.evaluate_classify:
+        import subprocess
+        project_root = Path(__file__).resolve().parent
+        script_path = project_root / "scripts" / "evaluate_classify_accuracy.py"
+        cmd = [sys.executable, str(script_path)]
+        if args.fixture:
+            cmd.extend(["--fixture", args.fixture])
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(project_root)
+        subprocess.run(cmd, check=True, cwd=project_root, env=env)
+        return
 
     # 인자 없이 실행 시 웹 UI 모드 (main.py 또는 main.py --web)
     if not args.text and not args.url:
@@ -121,6 +152,21 @@ def main():
         "input_text": input_text,  # 파일에서 읽어온 '본문' 내용 (여기에 넣어줘야 함!)
         "max_improve": 3  # 3회 초과 시 마지막 요약으로 확정
     }
+
+    # URL/텍스트 처리 시, 맨 처음에 분류 정확도 평가 결과 출력 (선택)
+    if args.show_classify_accuracy:
+        import subprocess
+        project_root = Path(__file__).resolve().parent
+        script_path = project_root / "scripts" / "evaluate_classify_accuracy.py"
+        cmd = [sys.executable, str(script_path)]
+        if args.fixture:
+            cmd.extend(["--fixture", args.fixture])
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(project_root)
+        subprocess.run(cmd, check=True, cwd=project_root, env=env)
+        print("\n" + "=" * 60)
+        print("아래: URL/텍스트 처리 결과")
+        print("=" * 60 + "\n")
     
     # # URL이 있으면 추가(input_url로 기능 이동)
     # # if target_url:
