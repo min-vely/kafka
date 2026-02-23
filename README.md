@@ -11,36 +11,47 @@ kafka/
 ├── .env                       # 환경 변수 (API 키)
 │
 ├── agent/                     # 핵심 AI 에이전트
-│   ├── database.py           # SQLite 데이터베이스 관리
-│   ├── rag.py                # RAG 검증 시스템
-│   ├── graph/                # LangGraph 워크플로우
-│   ├── nodes/                # 각 처리 단계 노드
-│   ├── notification/         # 알림 시스템
+│   ├── database.py           # SQLite 데이터베이스 관리 (schedules, url_queue, notifications, retry_schedules, quiz_attempts)
+│   ├── rag.py                # RAG 검증 시스템 (FAISS, 근거 부착)
+│   ├── graph/                # LangGraph 워크플로우 (StateGraph)
+│   ├── nodes/                # 각 처리 단계 노드 (input_url, extract_content, classify, synthesize, verify, judge, improve, quiz, persona, schedule 등)
+│   ├── notification/         # 알림 시스템 (winotify/pync/plyer)
 │   ├── prompts/              # LLM 프롬프트
-│   ├── scheduler/            # 실시간 스케줄러
-│   │   └── scheduler_service.py  # 스케줄러 진입점
-│   ├── schemas/              # 데이터 스키마
-│   └── utils/                # 유틸리티 함수
+│   ├── scheduler/            # APScheduler (매일 오전 8시, 에빙하우스 D+1·4·7·11)
+│   │   ├── scheduler_service.py
+│   │   └── jobs.py           # process_one_from_queue, send_daily_notifications
+│   ├── schemas/              # AgentState 등 데이터 스키마
+│   ├── tools/                # Jina Reader, Tavily, 구글 캘린더 Tool
+│   └── utils/                # 에빙하우스 날짜 계산, 캐시 등
 │
 ├── web/                       # 웹 퀴즈 시스템
-│   ├── app.py                # Flask 앱
+│   ├── app.py                # Flask 앱 (URL 입력·즉시 처리·퀴즈)
 │   ├── web_server.py         # 웹 서버 진입점
 │   ├── static/               # CSS, JS
 │   └── templates/            # HTML 템플릿
+│
+├── scripts/                   # 유틸 스크립트
+│   ├── evaluate_classify_accuracy.py
+│   ├── visualize_workflow.py
+│   └── seed_multiple_notifications_test.py
 │
 ├── docs/                      # 문서
 │   ├── DATABASE_GUIDE.md
 │   ├── NOTIFICATION_CLICK_GUIDE.md
 │   ├── QUIZ_GUIDE.md
-│   └── SCHEDULER_GUIDE.md
+│   ├── SCHEDULER_GUIDE.md
+│   ├── URL_QUEUE_GUIDE.md
+│   ├── WEB_UI_GUIDE.md
+│   ├── WORKFLOW_VISUALIZATION.md
+│   └── WINDOWS_NOTIFICATION_FIX.md
 │
 ├── tests/                     # 테스트 파일
 │   ├── test_database.py
 │   ├── test_popup.py
-│   └── article.txt
+│   └── fixtures/classify_samples.json
 │
 └── data/                      # 데이터 파일
-    └── *.db                   # SQLite 데이터베이스
+    └── *.db                   # SQLite (kafka.db, cache.db)
 ```
 
 ## 🚀 빠른 시작
@@ -53,7 +64,16 @@ pip3 install -r requirements.txt
 ### 2. 환경 변수 설정
 `.env` 파일에 API 키 추가:
 ```env
+# 필수
 UPSTAGE_API_KEY=your_api_key_here
+
+# 선택 (지식형 보강용)
+TAVILY_API_KEY=your_tavily_key
+
+# 선택 (LangSmith 관측용)
+LANGSMITH_API_KEY=your_langsmith_key
+LANGCHAIN_TRACING_V2=true
+LANGSMITH_PROJECT=kafka
 ```
 
 ### 3. 실행 (웹 UI 또는 CLI)
@@ -74,6 +94,13 @@ python3 main.py --url "https://example.com/article"
 
 # URL 즉시 처리 (큐 거치지 않고 바로 처리)
 python3 main.py --url "https://example.com/article" --process-now
+
+# 분류 정확도 평가 (fixture 기반)
+python3 main.py --evaluate-classify
+python3 main.py --evaluate-classify --fixture tests/fixtures/classify_samples.json
+
+# 처리 전 분류 정확도 평가 결과 함께 출력
+python3 main.py --url "https://example.com/article" --process-now --show-classify-accuracy
 ```
 
 ### 4. 웹 서버 직접 실행 (터미널 1)
@@ -113,13 +140,14 @@ python3 -m agent.scheduler.scheduler_service --interval 10
 - 친근한 친구, 다정한 선배, 엄격한 교수, 유머러스한 코치, 밈 마스터 등
 
 ### 4. 클릭 가능한 알림
-- **macOS**: pync 라이브러리
-- **Windows**: win10toast 라이브러리
-- 알림 클릭 시 자동으로 웹 퀴즈 페이지 열림
+- **macOS**: pync (클릭 시 웹 퀴즈 URL 열림)
+- **Windows**: winotify
+- **기타**: plyer (클릭 불가 fallback)
 
 ### 5. 웹 기반 퀴즈 시스템
-- URL 무제한 저장, 매일 1개씩 처리
-- 자동 채점 및 오답 재발송 (최대 3회)
+- URL 무제한 저장 (url_queue), 매일 1개씩 처리
+- 5문제 4지선다, 60점 이상 합격
+- 오답 시 다음날 재발송 (retry_schedules, 최대 3회)
 
 ## 🧪 테스트
 
@@ -150,14 +178,6 @@ python3 -m agent.scheduler.scheduler_service --test-multi
 
 # 일반 테스트 (한 번 보낸 알림은 스킵)
 python3 -m agent.scheduler.scheduler_service --test
-
-# 2-1. 여러 개 알림 테스트 (반복 가능)
-python3 -m agent.scheduler.scheduler_service --test-multi
-# → 알림 3개 연달아 표시, 여러 번 실행해도 매번 재발송
-
-# 일반 테스트 (한 번 보낸 알림은 스킵)
-
-python3 -m agent.scheduler.scheduler_service --test
 ```
 
 ## 📚 문서
@@ -166,8 +186,10 @@ python3 -m agent.scheduler.scheduler_service --test
 - [클릭 가능한 알림 가이드](docs/NOTIFICATION_CLICK_GUIDE.md)
 - [퀴즈 시스템 가이드](docs/QUIZ_GUIDE.md)
 - [스케줄러 가이드](docs/SCHEDULER_GUIDE.md)
+- [URL 대기열 가이드](docs/URL_QUEUE_GUIDE.md)
 - [워크플로우 시각화](docs/WORKFLOW_VISUALIZATION.md)
 - [웹 UI 사용 가이드](docs/WEB_UI_GUIDE.md)
+- [Windows 알림 설정](docs/WINDOWS_NOTIFICATION_FIX.md)
 
 ### 워크플로우 시각화
 ```bash
@@ -177,10 +199,14 @@ python3 scripts/visualize_workflow.py
 
 ## 🛠️ 기술 스택
 
-- **LLM**: Upstage Solar Pro3
-- **프레임워크**: LangGraph, LangChain
-- **웹**: Flask
-- **DB**: SQLite
-- **스케줄러**: APScheduler
-- **알림**: pync (macOS), win10toast (Windows)
-
+- **LLM**: Upstage Solar Pro2 — 콘텐츠 분류, 3줄 요약, 퀴즈·생각유도 질문 생성, Judge, 페르소나 적용
+- **임베딩**: Upstage Solar Embedding — RAG용 원문 청크 임베딩
+- **오케스트레이션**: LangGraph, LangChain — StateGraph 기반 워크플로우, 노드·분기·루프 설계
+- **본문 추출**: Jina Reader (r.jina.ai) — URL → 광고·메뉴 제거된 Markdown 본문 추출
+- **웹 검색**: Tavily Search API — 지식형·동적 정보 시 최신 업데이트 검색
+- **RAG**: FAISS, rank_bm25 — 벡터 검색, 요약 검증·근거 부착
+- **DB**: SQLite — schedules, url_queue, notifications, retry_schedules, quiz_attempts, cache
+- **웹**: Flask — 퀴즈 UI, URL 입력·즉시 처리
+- **스케줄링**: APScheduler — 에빙하우스 D+1·4·7·11일 알림 예약
+- **알림**: winotify (Windows), pync (macOS), plyer — OS별 데스크톱 알림
+- **평가·관측**: LangSmith
