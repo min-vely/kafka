@@ -13,6 +13,9 @@ import time
 from agent.utils import clean_content_for_display
 
 
+from agent.utils import clean_content_for_display
+
+
 def process_one_from_queue(db):
     """
     URL 대기열에서 1개 꺼내서 전체 파이프라인 처리 (매일 1개씩)

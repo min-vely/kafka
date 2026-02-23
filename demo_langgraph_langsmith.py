@@ -1,270 +1,557 @@
 #!/usr/bin/env python
 """
-demo_langgraph_langsmith.py
+demo_langgraph_langsmith.py (FULL REPLACE)
 
-Kafka Mini Upstage - LangGraph + LangSmith demo runner
-- DOES NOT touch main.py
-- Shows: graph construction + invocation + LangSmith tracing
-- Ensures Tool calls appear as "Tool" spans in LangSmith (via ToolNode)
-- Extensible: add judge_parse_failed handling / fallback nodes without refactoring the whole file
+✅ What this version guarantees
+- URL 입력 시 get_article_content_tool 은 반드시 ToolNode로 호출되어 LangSmith Tool span에 찍힘
+- LLM이 기사 내용을 읽고 '최신 업데이트 필요'하다고 판단할 때만 get_latest_update_analysis 호출
+- 캘린더는 LLM이 행사명/날짜/시간/설명을 추출해서 calendar_event_adder에 넣어
+  구글 캘린더 화면에서 제목/시간/설명이 "성의있게" 보이도록 개선
+
+Requirements:
+- .env (same folder) or environment vars:
+  UPSTAGE_API_KEY, LANGSMITH_API_KEY, (optional) TAVILY_API_KEY
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
-from dotenv import load_dotenv
+import re
 from pathlib import Path
+from typing import List, Optional, TypedDict
 
-# demo 파일과 같은 폴더의 .env를 강제로 로드
-load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
+from dotenv import load_dotenv
 
-
-from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Sequence, TypedDict
-
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import tool
-
-# LangGraph
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 
-# Upstage LLM
 from langchain_upstage import ChatUpstage
+from langchain_core.tools import tool
 
 
 # -----------------------------
-# LangSmith / tracing helpers
+# ENV (.env in same folder)
 # -----------------------------
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
 
+
+# -----------------------------
+# Tracing
+# -----------------------------
 def configure_tracing() -> None:
     os.environ.setdefault("LANGSMITH_TRACING", "true")
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-    os.environ.setdefault("LANGSMITH_PROJECT", "kafka-demo-langgraph")
-    os.environ.setdefault("KAFKA_DEMO", "1")
+    os.environ.setdefault("LANGSMITH_PROJECT", "kafka-langgraph-demo")
+    os.environ.setdefault("LANGCHAIN_PROJECT", "kafka-langgraph-demo")
 
     print("\n[Tracing]")
-    print(f"  LANGSMITH_TRACING={os.environ.get('LANGSMITH_TRACING')}")
-    print(f"  LANGCHAIN_TRACING_V2={os.environ.get('LANGCHAIN_TRACING_V2')}")
-    print(f"  LANGSMITH_PROJECT={os.environ.get('LANGSMITH_PROJECT')}")
-    print(f"  UPSTAGE_API_KEY set={bool(os.environ.get('UPSTAGE_API_KEY'))}")
-
-    if not os.environ.get("LANGSMITH_API_KEY"):
-        print("  ⚠ LANGSMITH_API_KEY not set (trace won't be uploaded)")
-    else:
-        print("  ✅ LANGSMITH_API_KEY set")
+    print("  LANGSMITH_PROJECT =", os.getenv("LANGSMITH_PROJECT"))
+    print("  LANGCHAIN_PROJECT =", os.getenv("LANGCHAIN_PROJECT"))
+    print("  LANGSMITH_TRACING =", os.getenv("LANGSMITH_TRACING"))
+    print("  LANGCHAIN_TRACING_V2 =", os.getenv("LANGCHAIN_TRACING_V2"))
+    print("  UPSTAGE_API_KEY set =", bool(os.getenv("UPSTAGE_API_KEY")))
+    print("  LANGSMITH_API_KEY set =", bool(os.getenv("LANGSMITH_API_KEY")))
+    print("  TAVILY_API_KEY set =", bool(os.getenv("TAVILY_API_KEY")))
 
 
 # -----------------------------
-# Import project tools (robust)
+# Helpers
 # -----------------------------
+DATE_YMD_PATTERN = r"\b(20\d{2})[-\.](0?[1-9]|1[0-2])[-\.](0?[1-9]|[12]\d|3[01])\b"
 
-def _import_project_tools():
+
+def find_first_date_ymd(text: str) -> Optional[str]:
+    m = re.search(DATE_YMD_PATTERN, text or "")
+    if not m:
+        return None
+    y, mo, d = m.groups()
+    return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+
+
+def is_valid_ymd(s: str) -> bool:
+    return bool(re.match(r"^\d{4}-\d{2}-\d{2}$", s or ""))
+
+
+def normalize_hhmm(s: str) -> str:
     """
-    Import tools from your repo in a way that's resilient to minor refactors.
-
-    Expected (current) paths per your latest structure:
-      - agent/tools/calendar_event_adder.py : calendar_event_adder (tool)
-      - agent/tools/get_latest_update_analysis.py : get_latest_update_analysis (tool)
-
-    If you later rename files, just add another fallback import here.
+    Accept "9:00", "09:00", "9시", "9시 30분", "09시30분" etc.
+    Return "HH:MM" or "".
     """
-    calendar_event_adder = None
-    get_latest_update_analysis = None
+    if not s:
+        return ""
+    t = s.strip()
 
-    # calendar_event_adder tool
-    try:
-        from agent.tools.calendar_event_adder import calendar_event_adder as _cea  # type: ignore
-        calendar_event_adder = _cea
-    except Exception as e:
-        # Optional fallback if you rename the module later
-        try:
-            from agent.tools.calendar_tools import calendar_event_adder as _cea  # type: ignore
-            calendar_event_adder = _cea
-        except Exception:
-            raise ImportError(
-                "Could not import calendar_event_adder tool. "
-                "Expected agent.tools.calendar_event_adder:calendar_event_adder"
-            ) from e
+    # HH:MM
+    m = re.search(r"\b([01]?\d|2[0-3])\s*:\s*([0-5]\d)\b", t)
+    if m:
+        hh = int(m.group(1))
+        mm = int(m.group(2))
+        return f"{hh:02d}:{mm:02d}"
 
-    # latest update tool
-    try:
-        from agent.tools.get_latest_update_analysis import get_latest_update_analysis as _glua  # type: ignore
-        get_latest_update_analysis = _glua
-    except Exception as e:
-        # Optional fallback if you rename the module later
-        try:
-            from agent.tools.latest_update import get_latest_update_analysis as _glua  # type: ignore
-            get_latest_update_analysis = _glua
-        except Exception:
-            raise ImportError(
-                "Could not import get_latest_update_analysis tool. "
-                "Expected agent.tools.get_latest_update_analysis:get_latest_update_analysis"
-            ) from e
+    # "9시", "9시 30분"
+    m = re.search(r"\b([01]?\d|2[0-3])\s*시(?:\s*([0-5]?\d)\s*분)?\b", t)
+    if m:
+        hh = int(m.group(1))
+        mm = int(m.group(2) or 0)
+        return f"{hh:02d}:{mm:02d}"
 
-    return calendar_event_adder, get_latest_update_analysis
+    return ""
+
+def extract_time_range(text: str) -> tuple[str, str]:
+    """
+    Find time range like '08:00~17:00' or '8:00 - 17:00' or '08:00∼17:00'
+    Returns (start_hhmm, end_hhmm) or ("","").
+    """
+    if not text:
+        return "", ""
+
+    # normalize separators
+    t = text.replace("∼", "~").replace("～", "~").replace("−", "-").replace("–", "-")
+
+    m = re.search(r"\b([01]?\d|2[0-3])\s*:\s*([0-5]\d)\s*[~\-]\s*([01]?\d|2[0-3])\s*:\s*([0-5]\d)\b", t)
+    if not m:
+        return "", ""
+
+    sh, sm, eh, em = map(int, m.groups())
+    return f"{sh:02d}:{sm:02d}", f"{eh:02d}:{em:02d}"
 
 
 # -----------------------------
-# Demo-only tool (guaranteed)
+# Tools
 # -----------------------------
-
 @tool
 def summarize_metrics(text: str) -> str:
-    """Return lightweight metrics about the given text (always available; no external keys)."""
-    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
-    has_date_hint = any(tok in text for tok in ["202", "월", "일", ":", "AM", "PM"])
-    return (
-        f"chars={len(text)} "
-        f"lines={len(lines)} "
-        f"has_date_hint={has_date_hint}"
-    )
+    """Return lightweight metrics about the FULL text."""
+    raw = (text or "").strip()
+    lines = raw.count("\n") + 1 if raw else 0
+    date_hint = find_first_date_ymd(raw)
+    preview = raw[:180].replace("\n", "\\n")
+    return f"chars={len(raw)} lines={lines} date_hint={date_hint or 'None'} preview={preview}"
+
+
+def import_project_tools():
+    """
+    Import your repo tools (must exist in ZIP/repo):
+      - get_article_content_tool(url) -> str
+      - calendar_event_adder(event_name, date_str, time_str="09:00", details="") -> str
+      - get_latest_update_analysis(summary_text) -> str
+    """
+    from agent.tools.get_article_content_tool import get_article_content_tool  # type: ignore
+    from agent.tools.calendar_event_adder import calendar_event_adder  # type: ignore
+    from agent.tools.get_latest_update_analysis import get_latest_update_analysis  # type: ignore
+
+    return get_article_content_tool, calendar_event_adder, get_latest_update_analysis
 
 
 # -----------------------------
 # Graph state
 # -----------------------------
-
 class DemoState(TypedDict):
     messages: List[BaseMessage]
+    input_url: Optional[str]
     raw_text: str
+    web_update_decision: Optional[dict]  # {"need_web_update": bool, "reason": str}
+    event_info: Optional[dict]           # {"has_event": bool, "event_name":..., "date_str":..., "time_str":..., "details":...}
 
 
 # -----------------------------
-# LLM setup
+# LLM
 # -----------------------------
-
-def make_llm() -> ChatUpstage:
-    if not os.environ.get("UPSTAGE_API_KEY"):
+def make_llm(temp: float = 0.0) -> ChatUpstage:
+    if not os.getenv("UPSTAGE_API_KEY"):
         raise RuntimeError("UPSTAGE_API_KEY is not set")
-    model = os.environ.get("KAFKA_MODEL", "solar-pro2")
-    temperature = float(os.environ.get("KAFKA_TEMPERATURE", "0.2"))
-    return ChatUpstage(model=model, temperature=temperature)
+    return ChatUpstage(model=os.getenv("KAFKA_MODEL", "solar-pro2"), temperature=temp)
 
 
 # -----------------------------
 # Nodes
 # -----------------------------
-
 def planner_node(state: DemoState) -> DemoState:
     """
-    Planner decides which tools to call by emitting tool_calls.
-    We bind tools here so the model can produce tool_calls.
+    Narrative-only planner (NO tool calls).
     """
-    llm = make_llm()
-    calendar_event_adder, get_latest_update_analysis = _import_project_tools()
+    llm = make_llm(temp=0.2)
+    sys = SystemMessage(
+        content=(
+            "You are a demo planner. Do NOT call tools.\n"
+            "Write 2-3 bullets describing what will happen next in this graph."
+        )
+    )
+    snippet = (state.get("raw_text") or "")[:1200] or "(no text yet)"
+    user = HumanMessage(content=snippet)
+    ai = llm.invoke([sys, user])
 
-    tools = [summarize_metrics, calendar_event_adder, get_latest_update_analysis]
-    llm_with_tools = llm.bind_tools(tools)
+    return {
+        "messages": state.get("messages", []) + [sys, user, ai],
+        "input_url": state.get("input_url"),
+        "raw_text": state.get("raw_text", ""),
+        "web_update_decision": state.get("web_update_decision"),
+        "event_info": state.get("event_info"),
+    }
+
+
+def url_tool_calls_node(state: DemoState) -> DemoState:
+    """
+    If URL exists, deterministically call get_article_content_tool via ToolNode.
+    This is what makes the extractor show as a Tool span in LangSmith.
+    """
+    url = state.get("input_url")
+    if not url:
+        return state
+
+    tool_calls = [
+        {"name": "get_article_content_tool", "args": {"url": url}, "id": "call_extract"},
+    ]
+    ai = AIMessage(content="(tool_call: get_article_content_tool)", tool_calls=tool_calls)
+
+    return {
+        "messages": state.get("messages", []) + [ai],
+        "input_url": url,
+        "raw_text": state.get("raw_text", ""),
+        "web_update_decision": state.get("web_update_decision"),
+        "event_info": state.get("event_info"),
+    }
+
+
+def apply_extracted_text_node(state: DemoState) -> DemoState:
+    """
+    Read ToolMessage from get_article_content_tool and set it as raw_text.
+    """
+    raw_text = state.get("raw_text", "")
+    tool_msgs: List[ToolMessage] = [
+        m for m in state.get("messages", [])
+        if isinstance(m, ToolMessage)
+    ]
+
+    extracted = ""
+    for m in reversed(tool_msgs):
+        if m.name == "get_article_content_tool":
+            extracted = (m.content or "").strip()
+            break
+
+    if extracted:
+        raw_text = extracted
+
+    return {
+        "messages": state.get("messages", []),
+        "input_url": state.get("input_url"),
+        "raw_text": raw_text,
+        "web_update_decision": state.get("web_update_decision"),
+        "event_info": state.get("event_info"),
+    }
+
+
+def event_extractor_node(state: DemoState) -> DemoState:
+    """
+    LLM extracts event info.
+    Also regex-fallback for time range like 08:00~17:00.
+    """
+    llm = make_llm(temp=0.0)
+    raw_text = (state.get("raw_text") or "").strip()
 
     sys = SystemMessage(
         content=(
-            "You are a demo orchestrator.\n"
+            "You are a strict calendar event extractor.\n"
+            "Extract an event ONLY if the text clearly indicates a real scheduled event.\n\n"
+            "Return ONE JSON object ONLY:\n"
+            "{\n"
+            '  "has_event": true|false,\n'
+            '  "event_name": "string",\n'
+            '  "date_str": "YYYY-MM-DD or empty",\n'
+            '  "time_str": "HH:MM (start, 24h) or empty",\n'
+            '  "end_time_str": "HH:MM (end, 24h) or empty",\n'
+            '  "details": "short Korean details (<=200 chars) or empty"\n'
+            "}\n\n"
             "Rules:\n"
-            "1) ALWAYS call summarize_metrics(text=...) first.\n"
-            "2) If the text looks like an event/seminar/conference, call calendar_event_adder.\n"
-            "3) ALSO call get_latest_update_analysis(summary_text=...) once to show web-update tooling; "
-            "   if Tavily is unavailable, it should still return a message.\n"
-            "4) After tool calls, we will generate a final human-readable report.\n"
-            "Return tool calls only (no final report yet)."
+            "- Prefer ACTUAL event date, NOT article publish date.\n"
+            "- Be conservative.\n"
         )
     )
-    user = HumanMessage(content=state["raw_text"])
 
-    ai = llm_with_tools.invoke([sys, user])
-    return {"messages": state["messages"] + [sys, user, ai], "raw_text": state["raw_text"]}
+    user = HumanMessage(content=raw_text[:6000])
+    ai = llm.invoke([sys, user])
+    content = (ai.content or "").strip()
+
+    event_info = {
+        "has_event": False,
+        "event_name": "",
+        "date_str": "",
+        "time_str": "",
+        "end_time_str": "",
+        "details": "",
+    }
+
+    try:
+        m = re.search(r"\{.*\}", content, flags=re.DOTALL)
+        if m:
+            obj = json.loads(m.group(0))
+            event_info["has_event"] = bool(obj.get("has_event", False))
+            event_info["event_name"] = str(obj.get("event_name", "")).strip()[:80]
+            event_info["date_str"] = str(obj.get("date_str", "")).strip()
+            event_info["time_str"] = normalize_hhmm(str(obj.get("time_str", "")).strip())
+            event_info["end_time_str"] = normalize_hhmm(str(obj.get("end_time_str", "")).strip())
+            event_info["details"] = str(obj.get("details", "")).strip()[:200]
+    except Exception:
+        pass
+
+    # ✅ 정규식 fallback: 08:00~17:00 같은 패턴 직접 추출
+    if event_info["has_event"]:
+        st, et = extract_time_range(raw_text)
+        if st and not event_info["time_str"]:
+            event_info["time_str"] = st
+        if et and not event_info["end_time_str"]:
+            event_info["end_time_str"] = et
+
+    # 날짜 검증
+    if event_info["has_event"] and not is_valid_ymd(event_info["date_str"]):
+        event_info["has_event"] = False
+
+    return {
+        "messages": state.get("messages", []) + [
+            sys,
+            user,
+            AIMessage(content=json.dumps(event_info, ensure_ascii=False)),
+        ],
+        "input_url": state.get("input_url"),
+        "raw_text": raw_text,
+        "web_update_decision": state.get("web_update_decision"),
+        "event_info": event_info,
+    }
 
 
-def force_tools_node(state: DemoState) -> DemoState:
+
+def web_update_decider_node(state: DemoState) -> DemoState:
     """
-    Safety net: if planner did not emit tool_calls, we create tool_calls programmatically.
-    This guarantees Tool spans appear in LangSmith even when the model is uncooperative.
+    LLM decides if we should call get_latest_update_analysis (web update).
+    Outputs JSON: {"need_web_update": bool, "reason": "..."}
     """
-    raw = state["raw_text"]
+    llm = make_llm(temp=0.0)
+    raw_text = (state.get("raw_text") or "").strip()
+    date_hint = find_first_date_ymd(raw_text) or "None"
+
+    sys = SystemMessage(
+        content=(
+            "You are a strict decision module.\n"
+            "Decide whether it's worth calling a web-update tool that searches for NEWER information.\n\n"
+            "Return ONE JSON object only:\n"
+            '{"need_web_update": true|false, "reason": "short Korean reason"}\n\n'
+            "Call web-update when:\n"
+            "- The situation is evolving (negotiations, lawsuits, investigations, policy changes, markets/FX/stocks, disasters, elections, conflicts).\n"
+            "- Numbers are likely to change, or the article implies ongoing developments.\n"
+            "- The content seems time-sensitive.\n\n"
+            "Do NOT call web-update when:\n"
+            "- It is an evergreen explainer or a fixed event announcement with no evolving status.\n"
+            "- The content is clearly static.\n\n"
+            "Be conservative."
+        )
+    )
+
+    user = HumanMessage(
+        content=(
+            f"[date_hint_in_text]={date_hint}\n"
+            f"[input_url]={state.get('input_url') or '(none)'}\n\n"
+            "=== ARTICLE TEXT (trimmed) ===\n"
+            f"{raw_text[:4500]}\n"
+        )
+    )
+
+    ai = llm.invoke([sys, user])
+    content = (ai.content or "").strip()
+
+    decision = {"need_web_update": False, "reason": "파싱 실패로 웹 업데이트 생략"}
+    try:
+        m = re.search(r"\{.*\}", content, flags=re.DOTALL)
+        if m:
+            obj = json.loads(m.group(0))
+            decision["need_web_update"] = bool(obj.get("need_web_update", False))
+            decision["reason"] = str(obj.get("reason", "")).strip()[:160] or "이유 없음"
+    except Exception:
+        pass
+
+    # trace에 남기기 (LLM 원문 대신 JSON만 저장)
+    return {
+        "messages": state.get("messages", []) + [sys, user, AIMessage(content=json.dumps(decision, ensure_ascii=False))],
+        "input_url": state.get("input_url"),
+        "raw_text": raw_text,
+        "web_update_decision": decision,
+        "event_info": state.get("event_info"),
+    }
+
+
+def deterministic_tool_calls_node(state: DemoState) -> DemoState:
+    """
+    Build tool_calls deterministically.
+    Adds end_time to details (since calendar tool cannot receive end_time).
+    """
+    raw = state.get("raw_text", "")
+    decision = state.get("web_update_decision") or {}
+    need_web = bool(decision.get("need_web_update", False))
+
     tool_calls = [
         {"name": "summarize_metrics", "args": {"text": raw}, "id": "call_metrics"},
     ]
 
-    # lightweight heuristic for event-like text
-    eventish = any(k in raw for k in ["컨퍼런스", "세미나", "행사", "워크숍", "Conference", "Seminar"])
-    if eventish:
-        tool_calls.append({
-            "name": "calendar_event_adder",
-            "args": {"event_name": "Kafka Demo Event", "date_str": "2026-02-26", "time_str": "14:00", "details": "Demo auto-fill"},
-            "id": "call_calendar",
-        })
+    event_info = state.get("event_info") or {}
 
-    # always try update tool (it can return "no key/library")
-    tool_calls.append({
-        "name": "get_latest_update_analysis",
-        "args": {"summary_text": raw[:1200]},
-        "id": "call_update",
-    })
+    if event_info.get("has_event") is True:
 
-    ai = AIMessage(content="(forced tool calls)", tool_calls=tool_calls)
-    return {"messages": state["messages"] + [ai], "raw_text": state["raw_text"]}
+        event_name = (event_info.get("event_name") or "").strip() or "일정"
+        date_str = (event_info.get("date_str") or "").strip()
+        start_time = (event_info.get("time_str") or "").strip()
+        end_time = (event_info.get("end_time_str") or "").strip()
+        details = (event_info.get("details") or "").strip()
 
+        if not start_time:
+            start_time = "09:00"
 
-def tools_router(state: DemoState) -> Literal["tools", "force_tools"]:
-    msgs = state["messages"]
-    last = msgs[-1] if msgs else None
-    if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
-        return "tools"
-    return "force_tools"
+        # ✅ 종료시간을 details에 명확히 추가 (툴 수정 없이 해결)
+        if end_time:
+            end_line = f"종료: {end_time}"
+            if end_line not in details:
+                details = (details + "\n" + end_line).strip() if details else end_line
+
+        if is_valid_ymd(date_str):
+            tool_calls.append(
+                {
+                    "name": "calendar_event_adder",
+                    "args": {
+                        "event_name": event_name,
+                        "date_str": date_str,
+                        "time_str": start_time,
+                        "end_time_str": end_time, 
+                        "details": details,
+                    },
+                    "id": "call_calendar",
+                }
+            )
+
+    if need_web:
+        tool_calls.append(
+            {
+                "name": "get_latest_update_analysis",
+                "args": {"summary_text": raw[:2000]},
+                "id": "call_web_update",
+            }
+        )
+
+    ai = AIMessage(
+        content=f"(deterministic tool calls; need_web_update={need_web})",
+        tool_calls=tool_calls,
+    )
+
+    return {
+        "messages": state.get("messages", []) + [ai],
+        "input_url": state.get("input_url"),
+        "raw_text": raw,
+        "web_update_decision": state.get("web_update_decision"),
+        "event_info": state.get("event_info"),
+    }
 
 
 def finalize_node(state: DemoState) -> DemoState:
     """
-    Generate final report after tool execution (no further tool calls).
+    Deterministic final report (NO LLM).
     """
-    llm = make_llm()
-    calendar_event_adder, get_latest_update_analysis = _import_project_tools()
-    # tools are not bound here; this is the final narrative step
+    tool_msgs: List[ToolMessage] = [
+        m for m in state.get("messages", [])
+        if isinstance(m, ToolMessage)
+    ]
 
-    # Pull out tool outputs
-    tool_msgs: List[ToolMessage] = [m for m in state["messages"] if isinstance(m, ToolMessage)]
-    tool_text = "\n\n".join([f"[{m.name}]\n{m.content}" for m in tool_msgs]) or "(no tool outputs)"
+    # Debug tool names (you asked)
+    print("[DEBUG] tool_message_names =", [m.name for m in tool_msgs])
 
-    sys = SystemMessage(
-        content=(
-            "You are writing a concise demo report for a developer.\n"
-            "Use the tool outputs below. Keep it readable.\n"
-            "Include:\n"
-            "- tool outputs summary\n"
-            "- what the graph did (planner -> tools -> finalize)\n"
-            "- next extension points (judge_parse_failed, fallback)\n"
-        )
+    by_name = {}
+    for m in tool_msgs:
+        by_name.setdefault(m.name, []).append(m.content)
+
+    def join(name: str, empty: str) -> str:
+        out = "\n".join(by_name.get(name, [])).strip()
+        return out or empty
+
+    input_url = state.get("input_url") or "(none)"
+    raw_text = state.get("raw_text") or ""
+    cleaned_len = len(raw_text)
+    raw_head = raw_text[:260].replace("\n", " ")
+
+    decision = state.get("web_update_decision") or {"need_web_update": False, "reason": "(none)"}
+    decision_str = json.dumps(decision, ensure_ascii=False)
+
+    event_info = state.get("event_info") or {"has_event": False}
+    event_str = json.dumps(event_info, ensure_ascii=False)
+
+    report = (
+        "**Developer Demo Report (Deterministic)**\n\n"
+        "### Input\n"
+        f"- input_url: {input_url}\n"
+        f"- cleaned_text_len: {cleaned_len}\n"
+        f"- head: {raw_head}\n\n"
+        "### Calendar Event Extract (LLM)\n"
+        f"```json\n{event_str}\n```\n\n"
+        "### Web Update Decision (LLM)\n"
+        f"```json\n{decision_str}\n```\n\n"
+        "### Tool Outputs\n"
+        f"- get_article_content_tool:\n```\n{join('get_article_content_tool', '(not called)')}\n```\n\n"
+        f"- summarize_metrics:\n```\n{join('summarize_metrics', '(no output)')}\n```\n\n"
+        f"- calendar_event_adder:\n```\n{join('calendar_event_adder', '(not called)')}\n```\n\n"
+        f"- get_latest_update_analysis:\n```\n{join('get_latest_update_analysis', '(not called)')}\n```\n\n"
+        "### Graph Flow\n"
+        "- planner -> (if url) extract_url(ToolNode) -> apply_extracted_text\n"
+        "  -> event_extractor(LLM) -> web_update_decider(LLM)\n"
+        "  -> forced_tools(ToolNode) -> finalize\n"
     )
-    user = HumanMessage(
-        content=(
-            "=== INPUT TEXT ===\n"
-            f"{state['raw_text']}\n\n"
-            "=== TOOL OUTPUTS ===\n"
-            f"{tool_text}\n"
-        )
-    )
-    ai = llm.invoke([sys, user])
-    return {"messages": state["messages"] + [sys, user, ai], "raw_text": state["raw_text"]}
+
+    ai = AIMessage(content=report)
+    return {
+        "messages": state.get("messages", []) + [ai],
+        "input_url": state.get("input_url"),
+        "raw_text": raw_text,
+        "web_update_decision": state.get("web_update_decision"),
+        "event_info": state.get("event_info"),
+    }
 
 
 # -----------------------------
 # Build graph
 # -----------------------------
-
 def build_graph():
-    calendar_event_adder, get_latest_update_analysis = _import_project_tools()
-    tool_node = ToolNode([summarize_metrics, calendar_event_adder, get_latest_update_analysis])
+    get_article_content_tool, calendar_event_adder, get_latest_update_analysis = import_project_tools()
+
+    url_tools = ToolNode([get_article_content_tool])
+    main_tools = ToolNode([summarize_metrics, calendar_event_adder, get_latest_update_analysis])
 
     g = StateGraph(DemoState)
+
     g.add_node("planner", planner_node)
-    g.add_node("force_tools", force_tools_node)
-    g.add_node("tools", tool_node)
+    g.add_node("url_tool_calls", url_tool_calls_node)
+    g.add_node("url_tools", url_tools)
+    g.add_node("apply_extracted_text", apply_extracted_text_node)
+    g.add_node("event_extractor", event_extractor_node)
+    g.add_node("web_update_decider", web_update_decider_node)
+    g.add_node("tool_calls", deterministic_tool_calls_node)
+    g.add_node("tools", main_tools)
     g.add_node("finalize", finalize_node)
 
     g.add_edge(START, "planner")
-    g.add_conditional_edges("planner", tools_router, {"tools": "tools", "force_tools": "force_tools"})
-    g.add_edge("force_tools", "tools")
+
+    # Always go through URL tool-calling path; if no url, url_tool_calls_node returns state unchanged.
+    g.add_edge("planner", "url_tool_calls")
+    g.add_edge("url_tool_calls", "url_tools")
+    g.add_edge("url_tools", "apply_extracted_text")
+
+    g.add_edge("apply_extracted_text", "event_extractor")
+    g.add_edge("event_extractor", "web_update_decider")
+
+    g.add_edge("web_update_decider", "tool_calls")
+    g.add_edge("tool_calls", "tools")
     g.add_edge("tools", "finalize")
     g.add_edge("finalize", END)
 
@@ -272,58 +559,52 @@ def build_graph():
 
 
 # -----------------------------
-# CLI
+# Main
 # -----------------------------
-
-def read_input_text(args) -> str:
-    if args.text:
-        return args.text
-    if args.file:
-        with open(args.file, "r", encoding="utf-8") as f:
-            return f.read()
-    # Minimal URL support (optional): attempt to reuse your project's extractor if present.
-    if args.url:
-        try:
-            from agent.tools.get_article_content_tool import get_article_content_tool # type: ignore
-            # 툴을 직접 호출하여 내용을 가져옵니다.
-            return get_article_content_tool.invoke({"url": args.url})
-        except Exception:
-            # fallback: very simple fetch
-            import requests
-            r = requests.get(args.url, timeout=20)
-            r.raise_for_status()
-            return r.text[:8000]
-    raise SystemExit("Provide one of: --text, --file, --url")
+def read_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser()
+    p.add_argument("--text", type=str, default=None)
+    p.add_argument("--file", type=str, default=None)
+    p.add_argument("--url", type=str, default=None)
+    return p.parse_args()
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--text", type=str, default=None, help="Raw input text")
-    parser.add_argument("--file", type=str, default=None, help="Path to a text file")
-    parser.add_argument("--url", type=str, default=None, help="URL (optional)")
-    args = parser.parse_args()
-
+def main() -> None:
+    args = read_args()
     configure_tracing()
 
-    text = read_input_text(args).strip()
-    print("\n[Input]")
-    print(text[:400] + ("..." if len(text) > 400 else ""))
+    input_url = args.url
+    raw_text = ""
+
+    if args.text:
+        raw_text = args.text
+        print("\n[Input]\n  text_len =", len(raw_text))
+    elif args.file:
+        raw_text = Path(args.file).read_text(encoding="utf-8")
+        print("\n[Input]\n  file =", args.file, "len =", len(raw_text))
+    elif args.url:
+        # raw_text will be filled by get_article_content_tool
+        print("\n[Input]\n  url =", input_url)
+        raw_text = ""
+    else:
+        raise SystemExit("Provide --text, --file or --url")
 
     graph = build_graph()
+    out = graph.invoke(
+        {
+            "messages": [],
+            "input_url": input_url,
+            "raw_text": raw_text,
+            "web_update_decision": None,
+            "event_info": None,
+        }
+    )
 
-    initial: DemoState = {"messages": [], "raw_text": text}
-
-    # invoke (single run)
-    out = graph.invoke(initial)
-
-    # print final assistant message
-    last = out["messages"][-1]
     print("\n[Final Output]\n")
-    if isinstance(last, AIMessage):
-        print(last.content)
-    else:
-        print(getattr(last, "content", str(last)))
+    last = out["messages"][-1]
+    print(last.content)
 
 
 if __name__ == "__main__":
+    print("[BOOT] demo_langgraph_langsmith.py starting...")
     main()

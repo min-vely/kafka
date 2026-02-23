@@ -150,6 +150,14 @@ python3 -m agent.scheduler.scheduler_service --test-multi
 
 # 일반 테스트 (한 번 보낸 알림은 스킵)
 python3 -m agent.scheduler.scheduler_service --test
+
+# 2-1. 여러 개 알림 테스트 (반복 가능)
+python3 -m agent.scheduler.scheduler_service --test-multi
+# → 알림 3개 연달아 표시, 여러 번 실행해도 매번 재발송
+
+# 일반 테스트 (한 번 보낸 알림은 스킵)
+
+python3 -m agent.scheduler.scheduler_service --test
 ```
 
 ## 📚 문서
