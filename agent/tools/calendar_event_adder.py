@@ -1,6 +1,8 @@
 import urllib.parse
 from datetime import datetime, timedelta
 from langchain_core.tools import tool
+import os
+from langchain_upstage import ChatUpstage
 
 @tool
 def calendar_event_adder(
@@ -55,3 +57,41 @@ def calendar_event_adder(
 
     except Exception as e:
         return f"⚠️ 캘린더 링크 생성 실패: {repr(e)}"
+
+
+def run_calendar_agent(text_content: str):
+    llm = ChatUpstage(
+        model=os.getenv("KAFKA_MODEL", "solar-pro"),
+        temperature=0
+    )
+    
+    tools = [calendar_event_adder]
+    llm_with_tools = llm.bind_tools(tools)
+    
+    # 지시사항 강화: 작성일과 행사일 구분 명시
+    prompt_instruction = f"""
+    당신은 일정을 등록하는 엄격한 비서입니다. 다음 지침을 반드시 지키세요:
+
+    1. 텍스트 내에서 '행사 일시', '일정', 'Event Date'와 같은 문구 바로 옆에 있는 날짜를 찾으세요.
+    2. 절대(NEVER) 'Published Time', '작성일', '게시일'과 같은 메타데이터 날짜를 행사 날짜로 쓰지 마세요.
+    3. 만약 오늘({datetime.now().strftime('%Y-%m-%d')})보다 이전의 날짜(예: 2025년)가 추출된다면, 그건 행사 날짜가 아닐 확률이 높습니다. 그럴 땐 도구를 호출하지 말고 "NONE"을 반환하세요.
+    4. 텍스트에 "2026.01.30"이나 "1월 30일" 같은 미래 날짜가 있는지 눈을 크게 뜨고 찾으세요.
+    
+    분석할 텍스트:
+    {text_content}
+    """
+    
+    try:
+        msg = llm_with_tools.invoke(prompt_instruction)
+        
+        if msg.tool_calls:
+            # 여러 개가 나올 수 있으므로 첫 번째 호출 사용
+            tool_call = msg.tool_calls[0]
+            result = calendar_event_adder.invoke(tool_call["args"])
+            return text_content + result
+        
+        return text_content
+        
+    except Exception as e:
+        print(f"⚠️ 에이전트 실행 중 오류: {e}")
+        return text_content

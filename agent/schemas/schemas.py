@@ -28,6 +28,7 @@ class AgentState(TypedDict, total=False):
     summary: str   # JSON string: {"Summary":"...","UsedCitations":[...],"Citations":[...]}
     saved_summary: str  # 기획서 6번: 확정된 3줄 요약본 저장 (quiz/thought 생성 전)
     quiz: str      # JSON string: {"questions":[...]}
+    questions: List[Dict[str, Any]]  # 퀴즈 문제 객체 리스트
     thought_questions: List[str]
 
     # evaluation / control
